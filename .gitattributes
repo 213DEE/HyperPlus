@@ -1,0 +1,9 @@
+# Windows 上开发、GitHub 上发布 —— 不写这行的话，gradlew / *.sh 会带 CRLF 进仓库，
+# 在 Linux / macOS 上直接跑不起来。
+* text=auto eol=lf
+
+*.png binary
+*.jpg binary
+*.jar binary
+*.aar binary
+*.keystore binary

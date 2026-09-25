@@ -1,0 +1,103 @@
+<?xml version="1.0" encoding="utf-8"?>
+<manifest xmlns:android="http://schemas.android.com/apk/res/android">
+
+    <uses-permission android:name="android.permission.CAMERA" />
+    <uses-permission android:name="android.permission.FOREGROUND_SERVICE" />
+    <uses-permission android:name="android.permission.FOREGROUND_SERVICE_CAMERA" />
+    <uses-permission android:name="android.permission.POST_NOTIFICATIONS" />
+    <!-- 版本检测：查 GitHub Releases（匿名公开 API，不带任何凭据） -->
+    <uses-permission android:name="android.permission.INTERNET" />
+    <uses-permission android:name="android.permission.ACCESS_NETWORK_STATE" />
+    <!-- 接管屏幕方向：写 Settings.System.USER_ROTATION。授权走系统
+         「修改系统设置」页，不是运行时弹窗 -->
+    <uses-permission android:name="android.permission.WRITE_SETTINGS" />
+
+    <!--
+      ⛔ 刻意**不**声明 WRITE_SECURE_SETTINGS —— 实测 + AOSP 源码双重确认它在这件事上没用：
+
+         `SettingsProvider.mutateSystemSetting()` 里，该权限只用来**跳过前面的 AppOps 检查**；
+         后面那道 `enforceRestrictedSystemSettingsMutationForCallingPackage` 是**无条件**执行的，
+         而它只放行三种情况：① SYSTEM/SHELL/ROOT uid；② 键在 `Settings.System.PUBLIC_SETTINGS`；
+         ③ 包带 `PRIVATE_FLAG_PRIVILEGED`（特权包，安装期由 /system/priv-app + 白名单决定）。
+
+         本机实证：`pm grant WRITE_SECURE_SETTINGS` 之后 `dumpsys` 显示 `granted=true`、
+         `checkSelfPermission` 也返回 GRANTED，**但写自定义键仍然抛**
+         `You cannot keep your settings in the secure settings.`
+
+      ⇒ 真正的解法是走 ① 的 uid 豁免：借 root 的 uid 代写
+        （`su -c "settings put system <键> <值>"`），见 RootBridge。
+        所以这里不需要申请任何权限；写不进去时界面会引导用户授予 root。
+    -->
+
+    <uses-feature android:name="android.hardware.camera.front" android:required="true" />
+
+    <!--
+      ★★ 这是一个 LSPosed 模块（同时仍是普通 App）。
+         设计要点：**同一个 APK 两种身份**
+           - 普通身份：有界面，负责模式开关、方向校准、状态显示、版本检测；
+           - 模块身份：被注入 SystemUI 后，由 SystemUI 进程持有相机、判定方向、写屏幕方向。
+         为什么要把引擎放到 SystemUI 而不是本 App 的前台服务（2026-09-25 用户拍板）：
+           - 没有常驻通知；
+           - 不需要「修改系统设置」授权页（SystemUI 自带的 WRITE_SETTINGS 是 SYSTEM_FIXED）；
+           - SystemUI 开机即起，于是"开机自动生效"顺带解决（Android 15+ 已禁止
+             camera 类型前台服务开机自启，会抛 ForegroundServiceStartNotAllowedException）。
+         代价：与系统版本强耦合，且 SystemUI 崩 = 状态栏崩，因此模块侧必须把所有
+               异常都吞掉（见 HyperPlusModule 的纪律说明）。
+    -->
+    <application
+        android:allowBackup="false"
+        android:label="@string/app_name"
+        android:supportsRtl="true"
+        android:theme="@style/Theme.FaceRotateMvp">
+
+        <!-- LSPosed 模块元数据。作用域锁定 com.android.systemui（见 res/values/arrays.xml） -->
+        <meta-data
+            android:name="xposedmodule"
+            android:value="true" />
+        <meta-data
+            android:name="xposeddescription"
+            android:value="HyperPlus：按人脸方向自适应旋转屏幕。引擎运行在 SystemUI 进程内，无需常驻通知，也不需要额外授权。" />
+        <meta-data
+            android:name="xposedminversion"
+            android:value="93" />
+        <meta-data
+            android:name="xposedscope"
+            android:resource="@array/xposed_scope" />
+
+
+        <!-- ⚠️ 刻意**不**声明 screenOrientation：
+             用 fullSensor 会让 display.rotation 跟随传感器，从而**掩盖掉系统自动旋转设置的作用**，
+             于是"判定方向 vs 系统方向"就没法对照了（实测踩过）。
+             留默认（unspecified）才能让 display.rotation 真实反映系统状态。 -->
+
+        <!-- ★ 必须声明 singleTask：默认 standard 下每次 am start 都新建一个 Activity 实例，
+             旧实例的 renderLoop 清不干净（实测踩过：同一个 PID 里两组 STAT 交替输出，
+             一组冻结在 frames=20 永不增长，另一组正常）。 -->
+        <activity
+            android:name=".MainActivity"
+            android:exported="true"
+            android:launchMode="singleTask"
+            android:configChanges="orientation|screenSize|screenLayout|keyboardHidden|smallestScreenSize|density">
+            <intent-filter>
+                <action android:name="android.intent.action.MAIN" />
+                <category android:name="android.intent.category.LAUNCHER" />
+            </intent-filter>
+        </activity>
+
+        <!-- 控制中心快捷开关（两态：自动旋转 / 自适应旋转）。
+             permission=BIND_QUICK_SETTINGS_TILE 是必需的：只有系统 SystemUI
+             持有该权限，从而保证第三方无法伪造点击。 -->
+        <service
+            android:name=".RotateTileService"
+            android:exported="true"
+            android:icon="@drawable/ic_rotate_adaptive"
+            android:label="@string/tile_label"
+            android:permission="android.permission.BIND_QUICK_SETTINGS_TILE">
+            <intent-filter>
+                <action android:name="android.service.quicksettings.action.QS_TILE" />
+            </intent-filter>
+        </service>
+
+    </application>
+
+</manifest>

@@ -1,0 +1,14 @@
+<?xml version="1.0" encoding="utf-8"?>
+<resources>
+    <!--
+      LSPosed 注入作用域：只注入 SystemUI。
+
+      ★ 为什么只放 SystemUI 而不是"全部应用"：
+        - 引擎需要的能力（CAMERA 运行时权限 + WRITE_SETTINGS，均 SYSTEM_FIXED 授予）
+          只有 SystemUI 这个系统应用具备；注入到普通应用里没有意义；
+        - 注入面越小，出问题的概率与影响面就越小。
+    -->
+    <string-array name="xposed_scope">
+        <item>com.android.systemui</item>
+    </string-array>
+</resources>
