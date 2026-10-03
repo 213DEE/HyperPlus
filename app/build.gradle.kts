@@ -192,7 +192,20 @@ dependencies {
 
     // ---------- LSPosed 模块 ----------
     // ★ 本 App 同时是一个 LSPosed 模块：注入 SystemUI 后由它持有相机、判定方向、写屏幕方向。
-    //   compileOnly 是刻意的：运行时的 de.robv.android.xposed.* 由 LSPosed 框架在宿主
-    //   进程里提供，打进 APK 会造成重复类。
-    compileOnly("de.robv.android.xposed:api:82")
+    //
+    // ★★ 2026-10-03 换到**新 API（libxposed，targetApiVersion 102）**：
+    //   旧依赖是 `de.robv.android.xposed:api:82`（legacy）。迁移后**一行 legacy 引用都不剩**
+    //   —— 这不是风格问题：`targetApiVersion >= 102` 的模块在 **classloader 层**就被禁掉
+    //   legacy 包（`XposedHelpers` / `XSharedPreferences` / `XposedBridge.log` 全部不可用），
+    //   留着旧依赖只会在运行期抛 `NoClassDefFoundError`。
+    //   ⚠️ 顺带摘掉模块页那条「此模块使用了已废弃且即将移除的功能」横幅
+    //     —— 那条横幅的判据是"legacy + 声明支持 nsp + 存在 others 可读的 xml"，
+    //     三个条件这次一起消失（清单 meta-data 删了、`MODE_WORLD_READABLE` 不用了）。
+    //
+    // ★ `compileOnly` 是刻意的（与旧依赖同理）：运行时的 libxposed 类由 LSPosed 框架
+    //   在宿主进程里提供，打进 APK 会造成重复类。
+    //   ⚠️ `isMinifyEnabled = false`（见 buildTypes）⇒ **不需要** libxposed 官方那三条 R8 规则；
+    //     将来若开了混淆，必须补上 `-keep ... extends io.github.libxposed.api.XposedModule` 与
+    //     `-adaptresourcefilecontents META-INF/xposed/java_init.list`（入口类是**按名字**找的）。
+    compileOnly("io.github.libxposed:api:102.0.0")
 }

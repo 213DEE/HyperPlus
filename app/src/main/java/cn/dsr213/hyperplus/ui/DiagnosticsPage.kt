@@ -1,12 +1,9 @@
 package cn.dsr213.hyperplus.ui
 
 import androidx.compose.runtime.Composable
-import androidx.compose.runtime.collectAsState
-import androidx.compose.runtime.getValue
 import androidx.compose.ui.platform.LocalContext
 import androidx.compose.ui.res.stringResource
 import androidx.compose.ui.unit.sp
-import cn.dsr213.hyperplus.AppPrefs
 import cn.dsr213.hyperplus.ModuleLink
 import cn.dsr213.hyperplus.R
 import top.yukonga.miuix.kmp.basic.Text
@@ -52,11 +49,6 @@ internal fun DiagnosticsPage(
     val hs = hostState
     val ctx = LocalContext.current
 
-    // ★ 配置通道的**本进程**那一侧。在二级页里不能说"见上方卡片"（这里没有那张卡片），
-    //   所以直接给诊断原文。
-    val appChannelOk by AppPrefs.appChannelOk.collectAsState()
-    val appChannelDiagRes by AppPrefs.appChannelDiagRes.collectAsState()
-
     SubPage(title = stringResource(R.string.diag_title), onBack = onBack) {
         // ---------------------------------------------------- 触发与让步
         TextCard(title = stringResource(R.string.diag_section_trigger)) {
@@ -73,22 +65,18 @@ internal fun DiagnosticsPage(
                     stringResource(R.string.diag_kv_write),
                     stringResource(if (hs.writeGranted) R.string.diag_granted else R.string.diag_missing),
                 )
-                // ★ 从前这块叫「配置同步（root）」。配置通道换成 App 自己的 prefs 之后
-                //   不再需要 root，所以改成显示**通道两侧**的状态 —— 它才是现在唯一会出问题的地方。
-                //   ⚠️ 三态：老格式摘要里没有 cfold 字段时 `cfgOk` 为 null ⇒ 写"未知"，
-                //      不假装它是好的（诊断不许说谎）。
+                // ★ 从前这块叫「配置同步（root）」。配置通道换成 App 推广播之后
+                //   不再需要 root，显示的是**引擎有没有读到配置** —— 它才是现在唯一会出问题的地方。
+                //   ⚠️ 2026-10-03（libxposed 迁移）**少了一支**：此前这里先看"App 侧自检"
+                //      （`appChannelOk`，靠能不能以 `MODE_WORLD_READABLE` 打开 prefs 判断
+                //      本应用有没有被注入）。迁移后引擎不再读 prefs 文件 ⇒ 那个判据恒为假，
+                //      留着就是一条永久假警报 ⇒ 已随状态一起删除。
+                //      ⛔ 别再补回来：需要"被注入"的那个前提已经没了。
+                //   ⚠️ 三态（**这是它剩下的全部价值**）：老格式摘要里没有 `cfgold` 字段时
+                //      `cfgOk` 为 null ⇒ 写"未知"，不假装它是好的（诊断不许说谎）。
                 kv(
                     stringResource(R.string.diag_kv_cfg),
                     when {
-                        !appChannelOk -> {
-                            // ⚠️ `0` = `AppPrefs.init` 还没跑过（见 [AppPrefs.appChannelDiagRes]）。
-                            val reason = if (appChannelDiagRes != 0) {
-                                stringResource(appChannelDiagRes)
-                            } else {
-                                stringResource(R.string.diag_cfg_default_reason)
-                            }
-                            stringResource(R.string.diag_cfg_not_ready_app, reason)
-                        }
                         hs.cfgOk == false -> {
                             val reason = if (hs.cfgMsg.isNotEmpty()) {
                                 hs.cfgMsg

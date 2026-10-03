@@ -33,10 +33,8 @@
 | **绝不和别的 App 抢摄像头** | 四道闸门保证：正在扫码 / 视频通话时本应用自动让位 | ✅ 真机实测 |
 | **应用名单** | 名单里的应用（游戏、长视频）不弹按钮、不改方向 | ✅ 真机实测 |
 | **控制中心快捷开关** | 三档循环切换，不用打开 App | ✅ 真机实测 |
-| **实时角度预览** | 界面上实时显示识别到的角度，用来判断"到底跟没跟上" | ✅ 真机实测 |
 | **内屏 / 外屏分别设置** | 折叠屏两块屏的模式互不影响 | ✅ 真机实测 |
-| **默认方向** | 指定展开后内屏保持的方向 | 🔎 已实现，**需要 root** |
-| **方向校准** | 两步校准，适配不同机型的摄像头朝向 | 🔎 已实现，待更多机型验证 |
+| **方向** | 展开后内屏保持的方向，四选一（按摄像头位置选，需要 root）；引擎另按重力自动纠正 | 🔎 已实现，**需要 root** |
 | **界面多语言** | 简体中文 / 繁体中文 / English，跟随系统或手动指定 | 🔎 已实现 |
 | **更新提醒** | 启动时检查 GitHub Release 是否有新版本 | 🔎 已实现 |
 
@@ -52,17 +50,14 @@
 | 装 APK ＋ root ＋ LSPosed；模块作用域勾选 **`com.android.systemui`**（只勾这一项） | 引擎常驻在**系统界面进程**里，**回桌面、锁屏、App 被强杀都继续生效** |
 
 **只有一个引擎，它住在系统界面进程里。** App 本身不跑引擎、不开相机，只是一块「遥控器 + 仪表盘」：
-你在这里改的每一项配置都写进一份配置文件，常驻引擎读同一份文件并实时跟随。
+你在这里改的每一项配置都会直接推送给引擎，即时生效、并跨重启保留。
 
 **作用域只需要勾一项：`com.android.systemui`。**
 
 - `com.android.systemui` —— 引擎本体注入这里，于是「常驻」成立；
-- **「HyperPlus 自己」不用勾，而且在列表里根本找不到它** —— 配置从「App 的进程」流到
-  「引擎的进程」走的是 LSPosed 的 `XSharedPreferences` 通道，那条通道确实要求 App 进程
-  也被注入；但这件事**由 LSPosed 自己完成**：本模块用 `assets/xposed_init` 声明入口
-  （即 legacy 模块），LSPosed 在保存作用域时会自动把模块自己也加进去，并且**刻意不把它
-  显示在作用域列表里**。所以你在作用域界面找不到 HyperPlus 是设计如此，不是装坏了；
-  **只勾「系统界面」，不用去找自己。**
+- **「HyperPlus 自己」不用勾** —— 配置从「App 的进程」流到「引擎的进程」走的是模块自己的
+  通道（App 主动推送 ＋ 引擎代写镜像），**不需要 App 进程也被注入**。
+  ⇒ **只勾「系统界面」这一项就够。**
 
 > 万一通道真没打通（模块没启用、或装好后从没打开过 App），App 会自检并把这个结论直接写在
 > 「配置通道」卡片里 —— 而不是让你对着一堆点了没反应的开关猜。
@@ -115,11 +110,10 @@ adb logcat -b all -d | grep -i hyperplus     # 能看出启动走到哪一步
 adb shell ls -l /data/tombstones/            # 这里有文件 = native 崩溃，不是 Java 异常
 ```
 
-**症状二：LSPosed 里写着「此模块使用了已废弃且即将移除的功能」。**
+**症状二（只出现在 0.5.0 及更早的版本上）：LSPosed 里写着「此模块使用了已废弃且即将移除的功能」。**
 
-这是 **LSPosed 自己的提示，不是故障** —— 它指的是本模块用的配置文件共享通道
-（New XSharedPreferences）已被官方标记为废弃、计划在 LSPosed 2.3.0 移除。
-**现在功能一切正常**，不需要做任何操作。
+**0.6.0 起这条提示已经消失** —— 模块已迁移到 LSPosed 的新 API，模块页会显示 `API 102`。
+它本来也不是故障；如果你看到它，说明装的是 0.5.0 或更早的版本，升级即可。
 
 ### 三种模式，内屏 / 外屏各存一份
 
@@ -202,7 +196,7 @@ app/src/main/java/cn/dsr213/hyperplus/
 ├── FaceAnalyzer.kt            CameraX Analyzer ＋ 人脸检测多角度搜索
 ├── ForegroundGate.kt          前台朝向门（前台应用自管朝向时停手）
 ├── Uncontrollable.kt          「实测不可控」的记账（哪些应用本模块真的转不动）
-├── LiveAngle.kt               实时角度（4Hz，供界面预览，不进配置通道）
+├── LiveAngle.kt               实时角度（4Hz，引擎内部读数，不进配置通道）
 ├── HintSizePolicy.kt          悬浮按钮的尺寸策略
 ├── RotateHintOverlay.kt       半自动模式的「转一下？」悬浮按钮
 ├── CsvRecorder.kt             每帧原始数据落盘，供事后看曲线
@@ -223,7 +217,7 @@ app/src/main/java/cn/dsr213/hyperplus/
     ├── UiCommon.kt            共用组件
     ├── FunctionPage.kt        主页一：功能（旋转增强 / 实验）
     ├── SettingsPage.kt        主页二：设置（监控与排查 / 应用 / 关于 / 语言）
-    ├── RotationPage.kt        旋转增强（模式 / 开关 / 默认方向 / 实时角度 / 校准）
+    ├── RotationPage.kt        旋转增强（模式 / 开关 / 方向 / 预览按钮 / 应用名单）
     ├── AppWhitelistPage.kt    应用名单
     ├── DiagnosticsPage.kt     诊断
     ├── StatusPage.kt          运行状态
@@ -232,8 +226,8 @@ app/src/main/java/cn/dsr213/hyperplus/
     ├── AboutPage.kt           关于
     ├── DonateCard.kt          捐赠卡片
     ├── LiquidGlassBar.kt      液态玻璃悬浮底栏
-    ├── LiveAngleSection.kt    实时角度预览
-    ├── SlotCalibrationSection.kt  默认方向（根）
+    ├── DirectionSection.kt    「方向」卡（展开后方向，四选一）
+    ├── PhoneGlyph.kt          方向卡里的手机小图形
     ├── UpdateDialog.kt        更新提示
     └── FaceRotateTheme.kt     主题
 ```
@@ -243,7 +237,7 @@ app/src/main/java/cn/dsr213/hyperplus/
 
 ### 测试环境
 
-**本项目的所有结论都来自下面这一台设备。** 换机型请把「方向校准」走一遍。
+**本项目的所有结论都来自下面这一台设备。** 换机型请在「方向」卡里核对展开方向。
 
 **设备（实测）**
 
@@ -360,10 +354,8 @@ That is the one problem it solves, and it touches nothing else in the system.
 | **Never competes for the camera** | Four gates: while you scan a code or take a video call, this module steps aside | ✅ Verified on device |
 | **Per-app list** | Apps on the list (games, long videos) get no button and no rotation | ✅ Verified on device |
 | **Quick Settings tile** | Cycle the three modes without opening the app | ✅ Verified on device |
-| **Live angle readout** | Shows the detected angle in real time, so you can tell whether it is tracking | ✅ Verified on device |
 | **Separate inner / outer settings** | The two panels of a foldable keep independent modes | ✅ Verified on device |
-| **Default orientation** | Pin the orientation the inner screen unfolds into | 🔎 Implemented, **requires root** |
-| **Two-step calibration** | Adapts to a given device's camera orientation | 🔎 Implemented, needs more devices |
+| **Orientation** | Pick the orientation the inner screen unfolds into (one of four, requires root); the engine also self-corrects from gravity | 🔎 Implemented, **requires root** |
 | **UI localisation** | Simplified Chinese / Traditional Chinese / English, system-following or manual | 🔎 Implemented |
 | **Update check** | Checks GitHub Releases for a newer version on launch | 🔎 Implemented |
 
@@ -380,19 +372,15 @@ That is the one problem it solves, and it touches nothing else in the system.
 | APK + root + LSPosed, with the module scope set to **`com.android.systemui`** (that one entry only) | The engine lives inside the **SystemUI process**: it keeps working after you return to the home screen, lock the screen, or force-stop the app |
 
 **There is exactly one engine, and it lives in the SystemUI process.** The app itself runs no engine and
-opens no camera — it is a remote control plus a dashboard. Everything you change here is written to a
-configuration file, and the resident engine reads that same file and follows along.
+opens no camera — it is a remote control plus a dashboard. Everything you change here is
+pushed straight to the engine, effective immediately and preserved across reboots.
 
 **The scope needs exactly one entry: `com.android.systemui`.**
 
 - `com.android.systemui` — the engine itself is injected there, which is what makes it resident;
-- **HyperPlus itself is neither needed nor even listed** — config travels from the app process to the
-  engine process over LSPosed's `XSharedPreferences` channel, and that does require the app process
-  to be injected too; but **LSPosed does that on its own**: this module declares its entry point in
-  `assets/xposed_init` (i.e. it is a legacy module), so LSPosed automatically adds the module itself
-  to the scope whenever it saves the scope, and deliberately **hides that entry from the scope list**.
-  So not finding HyperPlus in the scope list is by design, not a broken install; **tick "System UI"
-  and stop looking for yourself.**
+- **HyperPlus itself does not need to be ticked** — config travels from the app process to the engine
+  over the module's own channel (the app pushes, the engine mirrors), and that **does not require the
+  app process to be injected**. ⇒ **Ticking "System UI" alone is enough.**
 
 > If the channel really is broken (module not enabled, or the app has never been opened after
 > installing), the app self-checks and states the conclusion right in its "config channel" card —
@@ -451,11 +439,10 @@ adb logcat -b all -d | grep -i hyperplus     # how far engine startup got
 adb shell ls -l /data/tombstones/            # a file here = native crash, not a Java exception
 ```
 
-**Symptom 2: LSPosed shows "this module uses a deprecated feature that will be removed".**
+**Symptom 2 (only on 0.5.0 and older): LSPosed shows "this module uses a deprecated feature that will be removed".**
 
-That is **LSPosed's own notice, not a fault** — it refers to the config-sharing channel
-(New XSharedPreferences) that upstream has deprecated and plans to remove in LSPosed 2.3.0.
-**Everything works today** and no action is needed.
+**This notice is gone as of 0.6.0** — the module now targets LSPosed's new API, and the module page
+shows `API 102`. It was never a fault; if you still see it you are on 0.5.0 or older — just upgrade.
 
 ### Three modes, stored separately for each panel
 
@@ -566,7 +553,7 @@ app/src/main/java/cn/dsr213/hyperplus/
     ├── UiCommon.kt            Shared components
     ├── FunctionPage.kt        Home page 1: Function (rotation / experimental)
     ├── SettingsPage.kt        Home page 2: Settings (monitoring / apps / about / language)
-    ├── RotationPage.kt        Rotation (mode / switches / default orientation / live angle / calibration)
+    ├── RotationPage.kt        Rotation (mode / switches / orientation / preview button / app list)
     ├── AppWhitelistPage.kt    Per-app list
     ├── DiagnosticsPage.kt     Diagnostics
     ├── StatusPage.kt          Runtime status
@@ -575,8 +562,8 @@ app/src/main/java/cn/dsr213/hyperplus/
     ├── AboutPage.kt           About
     ├── DonateCard.kt          Donation card
     ├── LiquidGlassBar.kt      Liquid-glass floating bottom bar
-    ├── LiveAngleSection.kt    Live angle preview
-    ├── SlotCalibrationSection.kt  Default orientation (root)
+    ├── DirectionSection.kt    "Orientation" card (four choices)
+    ├── PhoneGlyph.kt          Phone glyph used by the orientation card
     ├── UpdateDialog.kt        Update prompt
     └── FaceRotateTheme.kt     Theme
 ```
@@ -586,8 +573,8 @@ app/src/main/java/cn/dsr213/hyperplus/
 
 ### Test environment
 
-**Every claim in this README comes from the single device below.** On a different model, run the
-two-step calibration.
+**Every claim in this README comes from the single device below.** On a different model, confirm the
+unfold orientation on the "Orientation" card.
 
 **Device (measured)**
 
@@ -658,7 +645,7 @@ two-step calibration.
   Recovery steps and log commands are in "If something goes wrong after installing" above.
 - **Known blind spot**: the trigger is the orientation sensor, which only fires when the *device* moves. Phone propped on a desk while only your head turns **will not trigger** — there is currently **no** screen-on/unlock fallback trigger.
 - On some devices the orientation sensor does not wake while the screen is off, so the trigger layer may receive nothing.
-- The sign and phase of the orientation mapping depend on the specific device's camera orientation and mirroring, so the project offers **two-step calibration** (portrait baseline + left-landscape axis) instead of hard-coded parameters.
+- The sign and phase of the orientation mapping depend on the specific device's camera orientation and mirroring; the engine corrects this automatically from gravity, so no manual calibration step is required.
 - Verified on **one** device only (see Test environment). Foldable inner/outer differences and the
   orientation policies of other ROMs have far too few samples yet.
 - This is an early-stage project; implementation details and feasible boundaries are still being validated, and no technical approach is stated here as final.

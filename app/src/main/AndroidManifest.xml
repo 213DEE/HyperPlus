@@ -147,51 +147,33 @@
         android:label="@string/app_name"
         android:roundIcon="@mipmap/ic_launcher_round"
         android:supportsRtl="true"
-        android:theme="@style/Theme.FaceRotateMvp">
+        android:theme="@style/Theme.FaceRotateMvp"
+        android:description="@string/module_description">
 
-        <!-- LSPosed 模块元数据。作用域只需要 com.android.systemui（见 res/values/arrays.xml） -->
-        <meta-data
-            android:name="xposedmodule"
-            android:value="true" />
-        <meta-data
-            android:name="xposeddescription"
-            android:value="HyperPlus：按人脸方向自适应旋转屏幕。引擎运行在 SystemUI 进程内，无需常驻通知，也不需要额外授权。" />
-        <meta-data
-            android:name="xposedminversion"
-            android:value="93" />
         <!--
-          ★ 显式声明本模块要用「新版 XSharedPreferences」（配置通道，见 module/ModulePrefs）。
+          ★★ 2026-10-03：模块元数据**不再写在清单里** —— 模块已迁到 LSPosed 新 API（libxposed，API 102）。
 
-          框架侧的判定是 `xposedminversion > 92 || xposedsharedprefs`（见 LSPosed 的
-          `LoadedApkCreateCLHooker.hookNewXSP`），所以上面那行 93 其实已经满足；
-          这里再写一遍是**把意图写在明面上**：将来谁把 xposedminversion 降回 92，
-          配置通道不会跟着悄悄失效。
+          旧 legacy 的五条 meta-data（xposedmodule / xposeddescription / xposedminversion /
+          xposedsharedprefs / xposedscope）**全部删除**，取而代之的是三个文件：
+            · src/main/resources/META-INF/xposed/java_init.list  入口类（替代 assets/xposed_init）
+            · src/main/resources/META-INF/xposed/module.prop     minApiVersion / targetApiVersion
+            · src/main/resources/META-INF/xposed/scope.list      作用域（替代 @array/xposed_scope，
+                                                                 该数组已随本次迁移删除）
+          ⇒ 新 API 下模块名改用 `android:label`、模块说明改用 `android:description`
+            （就是上面 <application> 上的那个属性）。
 
-          ⛔ **2026-10-03 更正：这两个声明现在是"不能动"的** —— `xposedminversion > 92`
-          与 `xposedsharedprefs` 共用同一个门（`||`）。把它们一起关掉确实能消掉 LSPosed 的
-          废弃警告，但**配置通道会当场断**：那两个 hook（`checkMode` / `getPreferencesDir`）
-          就装在这个判据分支里面。
-          详见 docs/配置通道_nsp废弃警告_2026-10-03.md §2.4。
-          ⇒ **要消警告必须先换通道；在那之前保持原样。**
+          ⛔ **别把 meta-data 加回来**：
+            ① 新 API 下框架根本不读它们，加了等于没加；
+            ② 更要紧的是 —— 只要 `xposedminversion`（>92）或 `xposedsharedprefs` 重新出现，
+               LSPosed 就会重新判定"本模块声明使用 nsp"→ 「此模块使用了已废弃且即将移除的功能」
+               横幅**重新点亮**。本次迁移的全部目的就是摘掉它。
 
-          ⚠️ 它生效的前提是**本应用进程也要被注入** —— 但这件事**不需要用户做**，
-          也**做不到**（2026-10-03 更正，此前 README / 文档 / 界面文案里
-          「作用域里要勾 HyperPlus 自己」是错的，被抄了十几处）：
-          凡是用 `assets/xposed_init` 声明入口的 legacy 模块（本工程就是），
-          LSPosed 管理器在保存作用域时会**自动把模块自己的包加进去**
-          （管理器侧 `ConfigManager.setModuleScope` 里的 `if (legacy) { … app.packageName
-          = packageName … }`），读回来时又**两处过滤掉**（同文件 `getModuleScope`
-          与 `ScopeAdapter` 的 `packageName.equals(module.packageName)` 分支）
-          ⇒ **作用域列表里根本看不到 HyperPlus 自己**。
-          ⇒ 用户只需要勾 `com.android.systemui`；⛔ 别再写"必须勾 HyperPlus 自己"。
-          App 会自检并把结论显示在「配置通道」卡片里（见 AppPrefs.appChannelOk）。
+          ⚠️ 作用域仍然只有 `com.android.systemui`，现在是 META-INF/xposed/scope.list 唯一决定。
+            理由不变：引擎需要的能力（CAMERA + WRITE_SETTINGS，均 SYSTEM_FIXED 授予）只有
+            SystemUI 具备；注入面越小越安全。
+
+          ⇒ 背景 / 证据 / 取舍见 docs/API102迁移_2026-10-03.md
         -->
-        <meta-data
-            android:name="xposedsharedprefs"
-            android:value="true" />
-        <meta-data
-            android:name="xposedscope"
-            android:resource="@array/xposed_scope" />
 
 
         <!-- ⚠️ 刻意**不**声明 screenOrientation：

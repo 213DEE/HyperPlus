@@ -9,7 +9,6 @@ import androidx.compose.ui.Modifier
 import androidx.compose.ui.platform.LocalContext
 import androidx.compose.ui.res.stringResource
 import androidx.compose.ui.unit.dp
-import androidx.compose.ui.unit.sp
 import cn.dsr213.hyperplus.AppPrefs
 import cn.dsr213.hyperplus.CaptureStrategy
 import cn.dsr213.hyperplus.R
@@ -41,8 +40,9 @@ import top.yukonga.miuix.kmp.theme.MiuixTheme
  *   ② 开关        —— 省电优先 / 名单门控 / 停手交还 / 按钮等待时长
  *   ③ 使用提醒    —— 只在"当前这块屏"是自适应档时出现
  *   ④ 预览按钮    —— 叫悬浮按钮出来一次（传感器没法用电脑触发）
- *   ⑤ 方向校准    —— 两步标定 + 重置
- *   ⑥ 默认方向    —— 直接把内屏的方向槽位改成用户选的那个（[SlotCalibrationSection]，2026-10-03）
+ *   ⑤ 方向        —— 一张卡（[DirectionSection]，2026-10-04）：**展开后的方向**，四选一，
+ *                      每项配一部手机小图标（借 root 直写内屏槽位）。
+ *                      ⚠️ 它下面原来还有一块「校准」，同日**整块删除** —— 改由引擎拿重力全自动。
  *   ⑦ 应用名单    —— 整块内容（[AppWhitelistSection]），见下面那条 2026-10-01 的说明
  *
  * ============================ 2026-10-01：应用名单并进来了 ============================
@@ -63,7 +63,6 @@ import top.yukonga.miuix.kmp.theme.MiuixTheme
 @Composable
 internal fun RotationPage(
     onBack: () -> Unit,
-    onCalibrate: (Int) -> Unit,
     onOpenSettings: () -> Unit,
 ) {
     // ★ 配置的真值一律来自 AppPrefs（**写配置的唯一入口**，也是引擎会跟随的那份文件的内存投影）。
@@ -226,9 +225,14 @@ internal fun RotationPage(
         //   DENIED connect device 1 (PID 12358, score 1001 state 6) due to eviction policy
         //    - Blocked by existing device 0 client for package com.miui.aoc (PID 19801, score 200, state 1)
         //   ```
-        //   ⚠️ 关键是**"什么时候"被拒**：实测在 App 退到后台 / 被从最近任务划掉之后，
-        //      AON 的常开相机会起来（`com.xiaomi.aon` 注册 AOC 监听），我们就再也打不开前摄，
-        //      于是"桌面/别的应用里方向不跟手"。这条提醒就是为此而留。
+        //   ⚠️ **"什么时候"被拒**（2026-10-04 更正归因）：曾记为"App 退到后台 / 被从最近任务
+        //      划掉之后 AON 就起来"——那是**时间上的相关，不是因果**。同日归档里的 force-stop
+        //      实证反证了它：App 被强杀后引擎照常活着（心跳推进、`takeover=1` 保留），
+        //      而抢前摄的是 `com.miui.aoc`。触发 AON 的是**设备闲着 / 熄屏**这类条件，
+        //      不是"本应用还在不在最近任务里"。
+        //      ⛔ 别据此写出"别把本应用划掉"这类祈使句 —— 用户 2026-10-04 明确指出
+        //         "模块跑在 SystemUI 里、不需要后台常驻"，那种说法与之直接冲突，
+        //         而且会给出一个**没用**的动作。要讲就讲第一段那个真动作（关掉注视感知）。
         //
         //   ★ 本应用对此的处理是**让位 + 等它松手再补采**（不硬抢），
         //     被让位的次数会如实记在「诊断」页的「相机冲突」里 —— 那是判断"到底有没有在抢"的直接证据。
@@ -237,7 +241,10 @@ internal fun RotationPage(
                 // ⚠️ 2026-10-01 精简：原来这里是**两段共五行**，把"谁抢谁、我们怎么让位、
                 //   AON 是哪个进程"全讲了一遍 —— 那些是**我们的实现**，用户只关心两件事：
                 //   方向为什么会跟不上（原因）+ 我该怎么办（动作）。
-                // ⚠️ 2026-10-02 再精简：两段 → 一段，两件事各留一句、各带一个动作。
+                // ⚠️ 2026-10-02 再精简：两段 → 两件事各留一句，第一段带动作。
+                // ⚠️ 2026-10-04：第二段换了内容 —— 原来是「别把本应用从最近任务里划掉」
+                //   （见上面那段归因更正）。现在它是**打消顾虑**的一句：「本应用不用一直开着」。
+                //   下面那个按钮仍然只服务第一段（打开系统设置去关注视感知）。
                 Text(
                     text = stringResource(R.string.rotation_notice_body),
                     color = MiuixTheme.colorScheme.onSurfaceVariantSummary,
@@ -275,119 +282,23 @@ internal fun RotationPage(
             )
         }
 
-        // ---------------------------------------------------- 方向校准
-        TextCard(title = stringResource(R.string.rotation_calib_title)) {
-            val calibrated by AppPrefs.calibrated.collectAsState()
-            // ★★ 分步进度（2026-10-03 用户点名：「①/② 做完没，界面上看不出来」）。
-            //   两个布尔由 `AppPrefs.recordCalibStep` 按**引擎回报的结果**记，
-            //   详见 `AppPrefs.calibStep1Done` 的注释（系统侧没有分步状态，只能自己记）。
-            val step1 by AppPrefs.calibStep1Done.collectAsState()
-            val step2 by AppPrefs.calibStep2Done.collectAsState()
-            // ⚠️ `sign`（±1 内部符号位）与 `offsetDeg`（偏移角度）**都不在这里显示**：
-            //   前者露出来只会让人以为坏了；后者是**内部量** —— "偏移 12.3°"用户既不知道
-            //   正常范围、也没法据它做任何事。★ 这个数没丢，它在「诊断」页有
-            //   （`DiagnosticsPage` 的"角度偏移 xx°"）。
-            //   ⛔ 别把 `AppPrefs.offsetDeg` 的订阅加回来，只为显示一个用户用不上的数。
-            // ★★ 2026-10-03 用户连提两轮（先"看不懂"、再"太开发者了，要换成面对用户的"）
-            //   之后定稿。唯一的尺子：**最短 + 说现象，不写机制**。
-            //   ⛔ 别为了"亲切"加语气词（"就好""就行""呢"）—— 用户明确说过口语会显得冗长。
-            Text(
-                // ★★ 三态（2026-10-03）。中间那一支是本轮新增的重点 —— 用户点了 ① 之后
-                //   界面上原本没有任何痕迹，他不知道还要不要点 ②。
-                //   ⚠️ 第一支带上 `!calibrated` 这个附加条件：正常情况下
-                //     ① 成功 ⇒ `calibrated` 也是 true（① 自己就会落盘 sign/offset），
-                //     两者一致；但"系统说已校准、App 还没对齐进度"的那一瞬（2 秒轮询的
-                //     窗口内）绝不能把已校准的机器说成"按下面两步校准"。
-                text = when {
-                    !step1 && !calibrated -> stringResource(R.string.rotation_calib_hint_start)
-                    !step2 -> stringResource(R.string.rotation_calib_hint_step2)
-                    else -> stringResource(R.string.rotation_calib_hint_done)
-                },
-                color = MiuixTheme.colorScheme.onSurfaceVariantSummary,
-                style = MiuixTheme.textStyles.paragraph,
-            )
-
-            // ---------------------------------------------------- 实时角度（2026-10-01 新增）
-            //
-            // ★ 用户原话：「现在每次旋转的方向都是对的，不要再改变，但从外屏展开到内屏的
-            //   默认方向不对，**在方向校准里面加一个实时的角度显示，我告诉你正确方向**」。
-            //   ⇒ 放在「方向校准」这块里，紧挨着标定那几个按钮：这一页做的事就是
-            //     "看角度 → 判断方向对不对 → 必要时标定"，三件事挨在一起最顺手。
-            //
-            // ⚠️ 它**纯只读**：进入本页会自动让引擎开前摄采帧，但这期间引擎
-            //   **一个方向都不会写**（见块内的说明与 `AdaptiveEngine.setAnglePreview`）。
-            //   用户明确说过"不要再改变"，这就是对那句话的实现。
-            LiveAngleSection()
-
-            Text(
-                text = stringResource(R.string.rotation_calib_step1),
-                color = MiuixTheme.colorScheme.onSurface,
-                fontSize = 13.sp,
-                modifier = Modifier.padding(top = 8.dp),
-            )
-            TextButton(
-                // ★ 完成过就打勾（2026-10-03）：这是"①/② 做完没"最省字的表达 ——
-                //   不加括号说明、不加第二行状态，一眼可比。
-                //   ⚠️ 打完勾**仍然可点**：用户随时可以重做（比如换了握持习惯）。
-                //   ⚠️ `✓`(U+2713) 不属于 markdown 语法（不会像 `**` 那样被原样显示），
-                //     且系统字体自带这个字形。
-                //   ⚠️ 2026-10-03 多语言：打勾版与文字版是**两条资源**而不是"和 `✓` 拼接"——
-                //     不同语言里这个勾该放在前还是后并不确定，拼接会把语序焊死。
-                text = stringResource(
-                    if (step1) R.string.rotation_calib_step1_btn_done
-                    else R.string.rotation_calib_step1_btn,
-                ),
-                onClick = { onCalibrate(AppPrefs.CALIB_STEP_BASELINE) },
-                modifier = Modifier.fillMaxWidth().padding(top = 8.dp),
-            )
-            Text(
-                // ⚠️ 2026-10-03："摄像头朝左"替换掉了原来的"手机逆时针转 90°（顶部朝左）"。
-                //   两处改因：①"逆时针"描述的是**转动过程**，而用户转手机时屏幕内容朝**反**
-                //   方向转，容易掰错；②"顶部"要先做一次空间映射，"摄像头"是他直接看得见的东西。
-                //   ★ 与 `rotName` 的方位词保持一致（那边也是"摄像头朝左/右"）。
-                text = stringResource(R.string.rotation_calib_step2),
-                color = MiuixTheme.colorScheme.onSurface,
-                fontSize = 13.sp,
-                modifier = Modifier.padding(top = 8.dp),
-            )
-            TextButton(
-                // 与 ① 同理：完成过就打勾，仍可点（重做一次覆盖旧值）。
-                text = stringResource(
-                    if (step2) R.string.rotation_calib_step2_btn_done
-                    else R.string.rotation_calib_step2_btn,
-                ),
-                onClick = { onCalibrate(AppPrefs.CALIB_STEP_AXIS) },
-                modifier = Modifier.fillMaxWidth().padding(top = 8.dp),
-            )
-            Text(
-                text = stringResource(R.string.rotation_calib_camera_note),
-                color = MiuixTheme.colorScheme.onSurfaceVariantSummary,
-                fontSize = 13.sp,
-                modifier = Modifier.padding(top = 8.dp),
-            )
-            // ★★ 2026-10-02：原来这里是一个 `Spacer(4dp)` + 一个"裹住文字"的按钮。
-            //   现在与页内其他操作按钮统一：`fillMaxWidth()` + `padding(top = 8.dp)`。
-            //   ⚠️ 别把 `Spacer` 加回来 —— 间距改由按钮自己的上边距给，
-            //     两处各给一次会让这一个按钮比别的多空 4dp（看着像没对齐）。
-            TextButton(
-                text = stringResource(R.string.rotation_calib_reset),
-                onClick = { AppPrefs.clearCalibration() },
-                modifier = Modifier.fillMaxWidth().padding(top = 8.dp),
-            )
-        }
-
-        // ---------------------------------------------------- 默认方向（2026-10-03 新增）
+        // ---------------------------------------------------- 方向（2026-10-04 合并重做 + 删校准）
         //
-        // ★★ 用户原话：「**提供校准入口，直接修改默认槽位的值**」。
-        //   "展开后内屏是哪个方向"的真正决定量是**系统自己的每屏方向记忆**
-        //   （`user_rotation_inner`），而模块此前从没给过改它的入口 ⇒ 用户只能靠在
-        //   屏内反复转动去"喂"它，换一台机器更是无从下手。
-        //   ⇒ 这一块让用户**直接指定**。细节、以及"为什么它不是被删掉的那一版"，
-        //     都在 [SlotCalibrationSection] 的注释里。
+        // ★★ 原先这里是**两张卡**：「方向校准」（内联在本文件）与「默认方向」
+        //   （原 `ui/SlotCalibrationSection.kt`）。用户当天把两块一起否了 ——
+        //   原话「用不明白，不会知道正确的竖屏方向是哪一边，也看不懂手机横屏、摄像头朝左是什么姿势」。
+        //   ⇒ 先合并成一张 [DirectionSection]，姿势一律**画成图**。
         //
-        // ⚠️ 位置：紧跟「方向校准」、在名单之前。两块都是"方向不对时来这儿修"，
-        //   挨着最顺手；而名单有一两百行，只能待在整页末尾。
-        SlotCalibrationSection()
+        // ★★★ 随后用户又追加一条：「**不要用摄像头来校准了，用重力传感器**」
+        //   ⇒ 校准**整块删除**（含瞄准器、①② 分步、重新校准按钮），改由引擎全自动：
+        //     `AdaptiveEngine.noteSignEvidence` 每轮都用**重力扇区**校验符号位，证据够了自动翻正。
+        //     ⇒ 用户从此**一个按钮都不用点**。完整理由见 [DirectionSection] 的类注释。
+        //
+        // ⚠️ 位置：紧跟「开关」、在名单之前 —— 名单有一两百行，只能待在整页末尾。
+        // ⚠️ 原来内联在这里的 `LiveAngleSection()`（角度盘 + 原始读数行）也一并退役：
+        //   它本来就是给校准看的，校准没了它就没有存在的理由。
+        //   ⛔ 别再把任何"实时角度显示"加回来。
+        DirectionSection()
 
         // ---------------------------------------------------- 应用名单（2026-10-01 合并进来）
         //

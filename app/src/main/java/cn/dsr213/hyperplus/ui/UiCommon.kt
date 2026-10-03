@@ -406,6 +406,21 @@ internal fun modeName(ctx: Context, raw: String): String =
  * ⚠️ 措辞面向普通用户（2026-09-30 全量梳理）：
  *   原文案里的"LSPosed 注入 SystemUI""系统覆盖层被拒""按钮层级偏低"是给开发者看的。
  *   对用户只需说清**现象 + 该去哪检查什么**。
+ *
+ * ⚠️⚠️ 2026-10-04 更正 `semi_no_overlay` 的**动作**（原来给的是个没用的动作）：
+ *   它曾写「去系统设置给本应用「显示在其他应用上层」权限」。那条动作属于
+ *   **已被整个删除的"单机模式"**（引擎跑在 App 进程那套，见
+ *   `docs/半自动模式与稳定性优化_2026-09-28.md` §五：托管模式"悬浮窗走 system uid 豁免、
+ *   **不需要**任何授权"）。现行形态下本 App 甚至**不再声明** `SYSTEM_ALERT_WINDOW`
+ *   （清单里有专门一段写"刻意不声明"），也没有任何授权入口 ⇒ 用户照着字面去找会找不到，
+ *   就算找到、给了也没用。
+ *   ★ 现在这个分支的实况见引擎侧 `AdaptiveEngine.onSemiTriggered`：两档窗口类型
+ *     （状态栏子面板 → 普通悬浮窗）**都被 WindowManager 拒了**，属于真故障 ——
+ *     引擎注释里也早写着"提示语不再只怪缺少悬浮窗权限"。
+ *   ⇒ 所以现在的写法是"如实说现象 + 指向「诊断」页"，不再给假动作。
+ *     ⛔ 别把那条授权提示改回来。
+ *   ⚠️ `semi_low_layer`（层级降级那条）**没动** —— 它描述的是引擎侧的
+ *     `overlayType == 2038` 降级，与上面这条是两件事，别一起删。
  */
 internal fun semiStatusText(
     ctx: Context,
@@ -415,8 +430,8 @@ internal fun semiStatusText(
     overlayType: Int,
 ): String = when {
     shown > 0 && !overlayOk ->
-        // ⚠️ 2026-10-02 精简：原文"系统的…权限可能没给，请到系统设置里允许本应用"是两个
-        //   小句说一件事 ⇒ 合成一个动作句。**权限名一字不改**（用户得照着它去找）。
+        // ⚠️ 2026-10-02 曾把这里压成"一个动作句"，而那个动作是错的（授权属于已删掉的
+        //   单机模式）⇒ 2026-10-04 换成"现象 + 去哪看"，理由见上面的 KDoc。
         ctx.getString(R.string.semi_no_overlay)
     shown > 0 && overlayType == APP_OVERLAY_TYPE ->
         ctx.getString(R.string.semi_low_layer, shown, tapped)
@@ -459,7 +474,20 @@ internal fun errsText(ctx: Context, raw: String): String {
  *   `takeover=false` 有**两个完全不同的成因**，而且其中一个**根本不是故障** ——
  *   ① **前台应用不归本引擎管**（[ModuleLink.State.foregroundGated]）：引擎是**按设计**停手的，
  *      方向盘留在系统手上、`ACCELEROMETER_ROTATION` 被交还（见 `ForegroundGate`）。
- *   ② **真的缺 WRITE_SETTINGS**（`writeGranted == false`）—— 这才是要引导用户去授权的那个。
+ *   ② **真的缺 WRITE_SETTINGS**（`writeGranted == false`）—— 这一支的读数来自
+ *      **引擎侧** `Settings.System.canWrite(context)`，`context` 是 **SystemUI** 的；
+ *      对 SystemUI 而言 `WRITE_SETTINGS` 是 SYSTEM_FIXED 授予 ⇒ **正常情况下恒为 true**。
+ *
+ *   ⚠️⚠️ 2026-10-04 更正 ② 的**动作**：它原来写「到「旋转增强」页点一下授权」——
+ *     那个按钮**不存在**：本 App 的清单里刻意**没有** `WRITE_SETTINGS`
+ *     （见 `AndroidManifest.xml` 里"这里刻意不声明 WRITE_SETTINGS / SYSTEM_ALERT_WINDOW /
+ *     FOREGROUND_SERVICE"那一段），也没有任何授权入口；`MainActivity.openSystemSettings()`
+ *     只打开系统设置**首页**（那是给"注视感知"那条提醒用的）。
+ *     ⇒ 让用户去找一个不存在的按钮，比不说更糟。现在改成如实说"本应用代不了 + 去诊断页"。
+ *     ⛔ 别把"点一下授权"改回来。
+ *   ⚠️ 引擎侧还留着两个没有调用方的旧入口（`retryTakeover` / `refreshWriteSettingsGrant`，
+ *     注释都写着"供 UI 的…按钮调用"）—— 它们的 UI 已随"单机模式"一起删除。
+ *     那是引擎代码，本次没动；真要清理另开一轮。
  *
  *   ⚠️ 实测踩到的误报：状态串 `takeover=0|fg=1|fgstop=WHITELIST|fgpkg=cn.dsr213.hyperplus|grant=1`
  *      —— 本应用自己**恒豁免**，所以「设置」页在最前台时引擎本来就该停手；

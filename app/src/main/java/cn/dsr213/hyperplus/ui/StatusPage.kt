@@ -146,6 +146,8 @@ internal fun StatusPage(
                     StatusHeadline(stringResource(R.string.function_state_running))
                     // ⚠️ 2026-10-01 精简：删掉"运行在系统界面进程里"（进程实现属于「诊断」），
                     //   留下用户真正关心的那句 —— **不用一直开着它**。
+                    // ⚠️ 2026-10-04：原句以「退到后台…」开头，读起来仍像"本应用在后台跑着"，
+                    //   补一句「本应用不用一直开着：」把话挑明（用户当天点名的歧义）。
                     val background = stringResource(R.string.status_background)
                     val phaseSuffix = if (hs.phase != "ready") {
                         stringResource(R.string.status_phase_suffix, phaseText(ctx, hs.phase))

@@ -211,7 +211,7 @@ class ForegroundGateTest {
     /**
      * ★ 同一个集合无论按什么顺序装进去，落盘字符串必须一致。
      *
-     * 引擎侧的配置变更检测是**整键字符串比对**（见 `ModulePrefs.installPollFallback`）：
+     * 引擎侧的配置变更判据是**整快照比对**（见 `ModulePrefs.advanceBaseline`）：
      * 编码不稳定 ⇒ 内容没变却报"变了" ⇒ 每次轮询都触发一次白名单重算与重判。
      */
     @Test

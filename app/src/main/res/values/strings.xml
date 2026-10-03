@@ -13,6 +13,14 @@
 -->
 <resources>
     <string name="app_name">HyperPlus</string>
+    <!--
+      ★ 模块说明（2026-10-03 新增）。迁到 libxposed 新 API 之后，模块说明**不再走清单
+        meta-data**（`xposeddescription` 已随迁移删除）—— 新 API 约定用 `android:description`，
+        就是 `<application>` 上引用的这一条。
+      ⚠️ 它同时会被系统「应用信息」页拿去当应用说明，所以写的是"这东西干什么"，
+        ⛔ 不写安装步骤（那种话属于界面里的引导）。
+    -->
+    <string name="module_description">Senses how the device is held and keeps the screen turned the way you want. Needs LSPosed, with “System UI” in its scope.</string>
     <string name="tile_label">Adaptive rotation</string>
 
     <!-- ================================================ 语言选择器 -->
@@ -39,11 +47,16 @@
     <!-- ================================================ 主页：设置 -->
     <string name="settings_title">Settings</string>
     <string name="settings_channel_broken">⚠️ Settings won\'t take effect yet</string>
-    <string name="settings_channel_default">This app\'s system module isn\'t enabled.</string>
+    <!--
+      ★ 2026-10-03（libxposed 迁移）改了这句的说法：判据从「本应用有没有被 LSPosed 注入」
+        换成「引擎有没有读到你的配置」（状态摘要里的 cfold）⇒ 原来那句
+        「本应用的系统模块没有启用。」只在一种情况成立，现在是三种情况共用一条：
+        模块没启用 / 系统界面还没重启 / 引擎刚起来还没收到推送。
+      ⚠️ 下面那条 fix **一字未改** —— 它给的行动（在 LSPosed 里启用 + 勾「系统界面」）
+        在三种情况下都对，本来就是这一页最该说的一句话。
+    -->
+    <string name="settings_channel_default">The rotation service hasn\'t read your settings yet.</string>
     <string name="settings_channel_fix">Until it\'s fixed nothing here works — in LSPosed, enable HyperPlus and tick “System UI” in its scope.</string>
-    <!-- Why the config channel self-check failed (2026-10-03: moved out of AppPrefs so it can be localized) -->
-    <string name="channel_ready">Ready: settings live in the shared folder and the rotation service can read them</string>
-    <string name="channel_not_ready">Not ready: settings only go to this app\'s private folder, so the rotation service can\'t read them. In LSPosed, make sure HyperPlus is enabled and “System UI” is ticked in its scope, then restart this app.</string>
     <string name="settings_section_monitor">Monitoring &amp; troubleshooting</string>
     <string name="settings_status_title">Current status</string>
     <string name="settings_status_summary">Runtime · Rotation control · Current orientation · Semi-auto button</string>
@@ -60,7 +73,7 @@
     <string name="about_version">Version</string>
     <string name="about_checking"> (checking…)</string>
     <string name="about_run_mode">How it runs</string>
-    <string name="about_run_mode_value">Runs in the background; you don\'t need to keep this app open</string>
+    <string name="about_run_mode_value">Doesn\'t stay in the background, and you don\'t need to keep this app open</string>
     <string name="about_check_update">Check for updates</string>
     <string name="about_disclaimer_title">Disclaimer</string>
     <string name="about_disclaimer_body">This app adjusts screen orientation through LSPosed, which counts as an unofficial modification: it doesn\'t modify system files, and the core features don\'t need root — but please understand the risks before using it. If something goes wrong, just disable the module in LSPosed to restore everything.</string>
@@ -70,7 +83,7 @@
     <string name="function_section_rotation">Rotation</string>
     <string name="function_section_experimental">Experimental</string>
     <string name="function_rotation_title">Rotation enhancements</string>
-    <string name="function_rotation_summary">Inner screen: %1$s; the outer screen is handled by the system (Mode / Floating button / Orientation calibration / App list)</string>    <string name="function_state_probing">Reading status…</string>
+    <string name="function_rotation_summary">Inner screen: %1$s; the outer screen is handled by the system (Mode / Floating button / Orientation / App list)</string>    <string name="function_state_probing">Reading status…</string>
     <string name="function_state_noservice">Can\'t reach the rotation service</string>
     <string name="function_state_offline">Rotation service is offline</string>
     <string name="function_state_running">Running</string>
@@ -90,12 +103,6 @@
     <string name="experimental_adaptive_summary">Once on, select it in Rotation enhancements, under Mode</string>
     <string name="experimental_adaptive_note">Turning it off only hides the option from Mode; it won\'t change the mode you are currently using.</string>
 
-    <!-- ================================================ 标定提示（toast） -->
-    <string name="calib_ok">Calibrated</string>
-    <string name="calib_no_face">No face detected — face the camera and try again</string>
-    <string name="calib_bad_angle">The two angles aren\'t different enough — make sure you turned the phone 90°</string>
-    <string name="calib_timeout">Timed out waiting for System UI — please retry</string>
-    <string name="calib_unavailable">The rotation service is currently unavailable</string>
     <string name="open_settings_failed">Can\'t open system settings: %1$s</string>
 
     <!-- ================================================ 方向名（rotName） -->
@@ -149,7 +156,7 @@
     <string name="dur_hr_min">%1$d h %2$d min</string>
 
     <!-- ================================================ 半自动状态 -->
-    <string name="semi_no_overlay">Semi-auto: the rotate button can\'t be shown — grant this app “Display over other apps” in system settings</string>
+    <string name="semi_no_overlay">Semi-auto: the rotate button can\'t be shown — the system won\'t allow this floating button. Check Diagnostics for details.</string>
     <string name="semi_low_layer">Semi-auto: button shown %1$d times, taps took effect %2$d times. ⚠️ The button\'s layer is low, so once rotated a corner may be covered by the status bar</string>
     <string name="semi_idle">Semi-auto: a rotate button appears in the bottom-right when you turn the phone</string>
     <string name="semi_counts">Semi-auto: button shown %1$d times, taps took effect %2$d times</string>
@@ -166,7 +173,7 @@
     <!-- ================================================ 让位解释 -->
     <string name="takeover_gated">“%1$s” %2$s → this app isn\'t controlling the screen orientation for now and hands it back to the system (it recovers after you leave that app)</string>
     <string name="takeover_gated_current">The current app</string>
-    <string name="takeover_no_grant">Not active yet: missing “Modify system settings” permission — tap grant on the “Rotation enhancements” page</string>
+    <string name="takeover_no_grant">Not active yet: missing the “Modify system settings” permission, and this app can\'t grant it — check Diagnostics for details.</string>
     <string name="takeover_unknown">Not active yet (can\'t tell why right now; check the “Diagnostics” page for details)</string>
 
     <string name="stop_whitelist">is on your exempt list</string>
@@ -203,16 +210,16 @@
     <!-- ================================================ 二级页：当前状态 -->
     <string name="status_title">Current status</string>
     <string name="status_no_report">No status report received yet. Usually the module isn\'t enabled in LSPosed — in that case settings are saved, but the screen won\'t rotate.</string>
-    <string name="status_background">Still active after you background the app, lock the screen, or restart.</string>
+    <string name="status_background">No need to keep this app open — it stays active after you background it, lock the screen, or restart.</string>
     <string name="status_phase_suffix"> (now: %1$s)</string>
     <string name="status_screen_rotation">Screen: %1$s · Orientation: %2$s</string>
 
-    <!-- ================================================ 默认方向 -->
-    <string name="slot_title">Default orientation</string>
-    <string name="slot_desc">After unfolding, the inner screen keeps this orientation.</string>
-    <string name="slot_root_note">Needs root; the first tap will show a permission prompt.</string>
-    <string name="slot_unsupported">This device\'s system doesn\'t support orientation settings.</string>
-    <string name="slot_failed">Couldn\'t change it — make sure root access was granted.</string>
+    <!-- ================================================ Orientation (2026-10-04: default + calibration merged) -->
+    <string name="direction_title">Orientation</string>
+    <string name="direction_default_desc">After unfolding, the inner screen keeps this orientation.</string>
+    <string name="direction_root_note">Needs root; the first tap will show a permission prompt.</string>
+    <string name="direction_unsupported">This device\'s system doesn\'t support orientation settings.</string>
+    <string name="direction_failed">Couldn\'t change it — make sure root access was granted.</string>
 
     <!-- ================================================ 二级页：旋转增强 -->
     <string name="rotation_title">Rotation enhancements</string>
@@ -232,40 +239,12 @@
     <string name="rotation_hint_summary">After you turn the phone you have %1$d seconds to tap it; it disappears on timeout (semi-auto only)</string>
     <string name="rotation_hint_value">%1$d s</string>
     <string name="rotation_notice_title">Usage note</string>
-    <string name="rotation_notice_body">“Attention detection / Smart scanning” holds the front camera, so the orientation occasionally lags — consider turning it off: Settings → Lock screen → Attention detection.\n\nDon\'t swipe this app away from Recents: that lets the system camera take the front camera and adaptive mode stops working.</string>
+    <string name="rotation_notice_body">“Attention detection / Smart scanning” holds the front camera, so the orientation occasionally lags — consider turning it off: Settings → Lock screen → Attention detection.\n\nYou don\'t need to keep this app open, and it needs no autostart or battery whitelist — swiping it away or clearing it from Recents changes nothing.</string>
     <string name="rotation_notice_button">Open system settings</string>
     <string name="rotation_preview_title">Preview the rotate button</string>
     <string name="rotation_preview_body">The button only appears when the phone\'s orientation differs from the screen\'s. Tapping here makes it pop up once right away (same place as usual, bottom-right); if nothing happens, check the Diagnostics page.</string>
     <string name="rotation_preview_button">Show me the button once</string>
-    <string name="rotation_calib_title">Orientation calibration</string>
-    <string name="rotation_calib_hint_start">If the screen rotates the wrong way, calibrate with the two steps below.</string>
-    <string name="rotation_calib_hint_step2">① is done — now do ②.</string>
-    <string name="rotation_calib_hint_done">Calibrated. Redo it if the orientation goes wrong again.</string>
-    <string name="rotation_calib_step1">① Hold the phone upright facing you, head straight, for 2 seconds</string>
-    <string name="rotation_calib_step1_btn">① Record portrait</string>
-    <string name="rotation_calib_step1_btn_done">① Portrait ✓</string>
-    <string name="rotation_calib_step2">② Turn the phone to landscape with the camera on the left, head still upright, for 2 seconds</string>
-    <string name="rotation_calib_step2_btn">② Record landscape</string>
-    <string name="rotation_calib_step2_btn_done">② Landscape ✓</string>
-    <string name="rotation_calib_camera_note">Calibration uses the camera — close any camera or video-call app first.</string>
-    <string name="rotation_calib_reset">Reset to default (recalibration needed)</string>
 
-    <!-- ================================================ 实时角度 -->
-    <string name="live_zero_inner">0° = the inner screen\'s default orientation (converted)</string>
-    <string name="live_zero_outer">0° = the screen\'s default orientation (phone upright facing you)</string>
-    <string name="live_starting">Starting readings… (the rotation service can take up to 2 s to begin)</string>
-    <string name="live_stopped">Readings stopped (%1$d s ago) — leave this page and come back to restart. If it keeps failing, another app may be holding the front camera.</string>
-    <string name="live_no_face">No face detected — hold the phone in front of you with your face toward the screen.</string>
-    <string name="live_kv_sector">Detected orientation</string>
-    <string name="live_kv_display">System orientation</string>
-    <string name="live_kv_form">Current screen</string>
-    <string name="live_kv_raw">Raw reading</string>
-    <string name="live_raw_suffix">%1$s° (device-relative, not converted)</string>
-    <string name="live_footer">Readings use the front camera; rotation keeps working as usual. It stops automatically when you leave this page, after at most 3 minutes.</string>
-    <string name="live_dial_0">Up</string>
-    <string name="live_dial_1">Left</string>
-    <string name="live_dial_2">Down</string>
-    <string name="live_dial_3">Right</string>
 
     <!-- ================================================ 二级页：诊断 -->
     <string name="diag_title">Diagnostics</string>
@@ -277,11 +256,9 @@
     <string name="diag_granted">Granted</string>
     <string name="diag_missing">Missing</string>
     <string name="diag_kv_cfg">Settings sync</string>
-    <string name="diag_cfg_not_ready_app">Not ready · %1$s</string>
     <string name="diag_cfg_not_ready_engine">Not ready · the rotation service can\'t read it (%1$s)</string>
     <string name="diag_cfg_unknown">Unknown (not present in this state report)</string>
-    <string name="diag_cfg_ok">Ready (both the app side and the service side are fine)</string>
-    <string name="diag_cfg_default_reason">this app\'s system module isn\'t enabled</string>
+    <string name="diag_cfg_ok">Ready (the rotation service can read your settings)</string>
     <string name="diag_cfg_no_reason">no reason reported</string>
     <string name="diag_kv_camera">Front camera id</string>
     <string name="diag_camera_none">— (not ready)</string>

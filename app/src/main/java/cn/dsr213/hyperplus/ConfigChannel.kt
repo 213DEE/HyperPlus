@@ -48,7 +48,14 @@ internal object ConfigChannel {
 
     private const val TAG = "HyperPlusChannel"
 
-    /** 本应用包名。两侧读的都是它；引擎侧 `module/ModulePrefs.APP_PKG` 同源 */
+    /**
+     * 本应用包名 —— 2026-10-03 迁移后**全工程唯一的真值**。
+     *
+     * ★ 引擎侧那两个同名常量已经不再各写一份：`module/ModulePrefs.APP_PKG` 随
+     *   "引擎不再读文件"一起删除，`module/HyperPlusModule.APP_PKG` 改成引用这一条。
+     *   ⇒ 别再在任何地方写第二份字面量（改包名时漏一处就是"反向请求永远送不到"，
+     *     而且**不会报错**：广播发到一个没人听的包名上，静默失败）。
+     */
     const val APP_PKG = "cn.dsr213.hyperplus"
 
     /**

@@ -1,6 +1,5 @@
 package cn.dsr213.hyperplus
 
-import android.content.ContentResolver
 import android.content.Context
 import android.content.SharedPreferences
 import android.os.Handler
@@ -238,7 +237,16 @@ object AppPrefs {
      */
     private const val CONFIG_PUSH_DEBOUNCE_MS = 200L
 
-    /** 配置文件名。⚠️ 必须与 [cn.dsr213.hyperplus.module.ModulePrefs.PREFS_NAME] 一字不差 */
+    /**
+     * 配置文件名 —— 2026-10-03 迁移后**全工程唯一的真值**。
+     *
+     * ★ 从前这里写着「必须与 `ModulePrefs.PREFS_NAME` 一字不差」，因为引擎要按路径
+     *   去读这个文件（靠 LSPosed 的 nsp 把它重定向到双方都能读的 safe-zone）。
+     *   迁移后引擎**不再读任何文件**（配置走广播快照 + `Settings` 镜像）
+     *   ⇒ 那个对称约束已不存在，`ModulePrefs` 里的同名常量也已删除。
+     *   ⚠️ 但**别以为它就可以随便改了**：它现在实质上是"落盘格式"级别的常量 ——
+     *     改掉它会让老用户升级后读到一个空文件（配置看起来凭空丢失）。
+     */
     const val NAME = "facerotate_prefs"
 
     /**
@@ -496,49 +504,19 @@ object AppPrefs {
     private val _configDiag = MutableStateFlow("未初始化")
     val configDiag: StateFlow<String> = _configDiag.asStateFlow()
 
-    /**
-     * **App 侧**的配置通道自检：本应用进程有没有被 LSPosed 注入。
-     *
-     * ★ 为什么必须单独判这一条（2026-09-28 补，源码级结论）：
-     *   配置能被引擎读到的**前提**是 prefs 文件落在 LSPosed 的 safe-zone
-     *   （`/data/misc/<uuid>/prefs/<pkg>/`，SELinux `magisk_file`、目录 711、文件 664），
-     *   而那要靠 LSPosed 在**本应用进程**里 hook `ContextImpl.getPreferencesDir()` 才会发生。
-     *   按 `LoadedApkCreateCLHooker.afterHookedMethod`，这个 hook 只在
-     *   「当前进程就是模块自己的包」且该包在 `XposedInit.loadedModules` 里时安装，
-     *   ⇒ 本应用进程被注入是**硬前提**。
-     *
-     * ⚠️ **但这不需要用户做任何事**（2026-10-03 更正）：
-     *   此前这里写着「若用户没在作用域里勾上 HyperPlus 自己，本应用进程不会被注入」——
-     *   **是错的**。本模块用 `assets/xposed_init` 声明入口 = legacy 模块，而 LSPosed
-     *   在保存作用域时会**自动把模块自己的包也写进 scope**
-     *   （管理器侧 `ConfigManager.setModuleScope` 的 `if (legacy) { … }` 分支，
-     *   `userId = 0`），并且**刻意把它从作用域列表里过滤掉**（同文件 `getModuleScope`、
-     *   以及 `ScopeAdapter` 的 `packageName.equals(module.packageName)` 分支）
-     *   ⇒ 用户在列表里看不到、也不需要勾它。
-     *   ⇒ 界面提示**不许**再让用户去勾 HyperPlus 自己（勾不到），指向「启用模块 + 勾系统界面」。
-     *
-     * ★ 判据取"`MODE_WORLD_READABLE` 有没有被放行"而不是猜路径：
-     *   LSPosed 的 `checkMode` hook 与 `getPreferencesDir` hook 是**同一处代码**里一起装的
-     *   （`LoadedApkCreateCLHooker.hookNewXSP`），所以"能开 WORLD_READABLE"
-     *   ⇔ "被注入了" ⇔ "文件落在 safe-zone"。反过来必然抛 SecurityException。
-     *   一个 try 就能判定整条链路，不需要读任何私有路径。
-     */
-    private val _appChannelOk = MutableStateFlow(false)
-    val appChannelOk: StateFlow<Boolean> = _appChannelOk.asStateFlow()
-
-    /**
-     * 上面那条自检的**原因**，供界面显示。
-     *
-     * ⚠️ 2026-10-03 多语言：类型从 `StateFlow<String>` 改成 **`StateFlow<Int>`（资源 id）**。
-     *   原因不是"顺手" —— 原先这里存的是**算好的中文句子**，而它只在 [init] 里写一次，
-     *   而 [init] 在 `prefs != null` 时会**早退**（见上面那段注释）。
-     *   ⇒ 用户在设置里切换语言后，这句会**永远停在旧语言**，直到进程被杀掉重建。
-     *   存资源 id 就没有这个问题：id 与语言无关，取用那一刻才查表。
-     *
-     * `0` = 还没跑过 [init]（界面回退到 `settings_channel_default`）。
-     */
-    private val _appChannelDiagRes = MutableStateFlow(0)
-    val appChannelDiagRes: StateFlow<Int> = _appChannelDiagRes.asStateFlow()
+    // ★ 2026-10-03 迁移（libxposed API 102）时**删掉了两个状态**：`appChannelOk` /
+    //   `appChannelDiagRes`。它们是「App 侧自检」：靠**能不能以 `MODE_WORLD_READABLE`
+    //   打开 prefs** 来推断「本应用有没有被 LSPosed 注入」，因为只有被注入时框架才会把
+    //   prefs 重定向到引擎读得到的 safe-zone（`getPreferencesDir` 那个 hook）。
+    //
+    //   新 API 下这条链路**整个消失**：引擎不再读 prefs 文件，配置改由 App 推广播
+    //   （见 [ConfigChannel] / `module/ModulePrefs`），App 也就**不再需要被注入**。
+    //   ⇒ 那个判据恒为假 —— 留在界面上就是一条**永远挂着的假警报**。
+    //
+    //   ★ 现在「配置通道通没通」只剩**一个真值来源**：引擎在状态摘要里回传的
+    //     `cfgold` / `cfgmsg`（解析成 [cn.dsr213.hyperplus.ModuleLink.State.cfgOk] / `cfgMsg`）。
+    //     界面直接读它 —— 见 `ui/SettingsPage`（前置条件横幅）与 `ui/DiagnosticsPage`（读数）。
+    //   ⛔ 别再补回任何「App 侧自检」：它成立的前提（App 进程必须被注入）已经没了。
 
     /**
      * 是否已标定（判据：`Settings` 里**存在** OFFSET 键，而不是"值非 0"）。
@@ -661,17 +639,18 @@ object AppPrefs {
     /**
      * **App 进程**初始化。幂等：Activity、TileService 都会调。
      *
-     * ★ 打开方式必须带 [Context.MODE_WORLD_READABLE] —— 这是 LSPosed「New XSharedPreferences」
-     *   契约里的一环：LSPosed 会 hook `ContextImpl.checkMode` 抑制随之而来的
-     *   `SecurityException`，并 hook `getPreferencesDir()` 把文件重定向到 SELinux 友好的
-     *   safe-zone。**只有在这个模式下**框架才帮忙把文件弄成引擎可读的。
-     *   代价是它已被标 `@Deprecated`，所以有抑制注解。
+     * ★★ 2026-10-03 迁移后打开方式固定为 [Context.MODE_PRIVATE]，**不再是 WORLD_READABLE**。
+     *   旧写法是为了走 LSPosed 的 nsp：框架只在那个模式下 hook `checkMode` /
+     *   `getPreferencesDir`，把 prefs 重定向到引擎读得到的 safe-zone（另一套 hook 只对
+     *   被注入的进程生效）。nsp 已废（官方 2.3.0 移除），配置改由广播下发
+     *   ⇒ **没有任何人再读这个文件**，私有目录就是它的正确位置。
      *
-     * ⚠️ 模块**没启用**时上面两个 hook 都不存在 ⇒ 真的会抛 `SecurityException` ⇒
-     *   降级成 `MODE_PRIVATE`（此时引擎也不在，配置只要 App 自己读得到就够）。
-     *   两个模式落在**不同目录**，所以下面要做一次性迁移，否则用户配置会凭空丢失。
+     * ★ 顺带消掉的两件麻烦事：① 这条链路**不再依赖「本应用被 LSPosed 注入」**，
+     *   所以「safe-zone 前提」不成立了；② 也就不存在「模块没启用时会抛 SecurityException、
+     *   要降级 MODE_PRIVATE、还得做目录迁移」那一整套。
+     *   ⚠️ 但「文件的路径**可能**变了」这件事仍然存在（若 LSPosed 作用域里本应用的包被去掉）
+     *     ⇒ 由 [adoptConfigFromMirrorIfNeeded] 这条安全网兜住，别删它。
      */
-    @Suppress("DEPRECATION")
     fun init(context: Context) {
         if (prefs != null || hostMode) {
             // ★ 已初始化过也**必须重算形态**（2026-09-28 模式解耦后加的）。
@@ -691,28 +670,15 @@ object AppPrefs {
             val app = context.applicationContext ?: context
             ctx = app
 
-            val opened = runCatching {
-                app.getSharedPreferences(NAME, Context.MODE_WORLD_READABLE)
-            }.onFailure {
-                Log.i(TAG, "MODE_WORLD_READABLE 不可用（LSPosed 未注入本应用？）→ 降级 MODE_PRIVATE：${it.javaClass.simpleName}")
-            }.getOrNull()
-
-            // ★ 这一步的结果本身就是**整条配置通道的体检报告**，必须如实传给界面：
-            //   成功 = 本应用被注入 ⇒ prefs 落在 safe-zone ⇒ 引擎读得到；
-            //   失败 = 没被注入 ⇒ 文件落在本应用私有目录 ⇒ 引擎读不到，配置改了也不会生效。
-            _appChannelOk.value = opened != null
-            // ⚠️ 存**资源 id**，不存句子 —— 理由见 [appChannelDiagRes] 的注释（切换语言后会停在旧语言）。
-            // ⚠️ 文案里**不能写 markdown**：星号在真机上是**原样显示**的
-            //   （2026-10-02 全量文案梳理时又抓出一处 —— 界面上原来的
-            //    `**自己也勾上**` 就是带着星号显示的）。要强调就用「」。
-            _appChannelDiagRes.value = if (opened != null) {
-                R.string.channel_ready
-            } else {
-                R.string.channel_not_ready
-            }
-
-            val p = opened ?: app.getSharedPreferences(NAME, Context.MODE_PRIVATE)
+            // ★★ 迁移后固定 MODE_PRIVATE（理由见上面 KDoc）：没有任何人再读这个文件，
+            //   私有目录就是它正确的位置。
+            val p = app.getSharedPreferences(NAME, Context.MODE_PRIVATE)
             prefs = p
+
+            // ★★ 升级安全网：见 [adoptConfigFromMirrorIfNeeded] 的注释。
+            //   ⚠️ 位置必须在**注册变更监听之前** —— 监听之后再写，那次「补搬」会立刻
+            //     触发一条推送（无害，但会在日志里多出一条莫名其妙的「已推送配置快照」）。
+            adoptConfigFromMirrorIfNeeded(p)
 
             // ★★ 广播通道的挂钩点（2026-10-03）：**一处监听覆盖所有写入**。
             //   改配置的地方有十几处（每个 setter 各自 `edit().apply()`），逐个补"顺手推一次"
@@ -916,15 +882,148 @@ object AppPrefs {
         }.onFailure { Log.w(TAG, "清理历史键失败（已忽略，不影响功能）", it) }
     }
 
+    // ================================================================ 升级安全网
+
+    /** 一次性迁移的**完成标记**（写在 App 自己的 prefs 里；只判「跑过没有」） */
+    private const val K_ADOPTED_MIRROR = "migrated_from_engine_mirror"
+
+    /**
+     * [adoptConfigFromMirrorIfNeeded] 里**不该搬**的键：它们是「请求」，不是「设置」。
+     *
+     * ⚠️ 搬了会有**可见副作用** —— 它们是「值变了一个新高就触发一次动作」的语义
+     *   （标定 / 预览按钮 / 清除名单 / 熔断复位）：把上次那个旧时间戳原样搬回文件，
+     *   值**没变**所以引擎不会动（无害），但「文件被清空一次、这些键同时被搬回」
+     *   就会凭空触发一轮动作。用户的配置里**没有**「我上次点过标定」这一项，
+     *   所以它们本来就不该算「要保留的设置」。
+     */
+    private val REQUEST_ONLY_KEYS = setOf(
+        PrefsBridge.CALIB_REQ,
+        PrefsBridge.HINT_TEST,
+        PrefsBridge.UNCONTROLLABLE_CLEAR,
+        PrefsBridge.BREAKER_RESET,
+    )
+
+    /**
+     * ★★ **升级安全网**：把「引擎那份配置镜像」里存的配置搬回 App 自己的 prefs（一次性）。
+     *
+     * ============================ 它防的是什么 ============================
+     * 迁移前，App 的 prefs 文件**不在**自己的私有目录里 —— LSPosed 的 nsp 会 hook
+     * `getPreferencesDir()` 把它重定向到全局可读的 safe-zone
+     * （`/data/misc/apexdata/<uuid>/prefs/<pkg>/`，之所以能被引擎读到就是因为这个）。
+     * 而那个 hook **只对被注入的进程生效** ⇒ 迁移后（模块不再是 legacy
+     * ⇒ 管理器重算作用域时会把「模块自己的包」从作用域里去掉）本应用进程可能不再被注入，
+     * `getSharedPreferences` 从此读的是**私有目录里那个空文件**。
+     *
+     * ⇒ 后果不是「看不见设置」这么轻：界面会把默认值当成用户的配置**推给引擎**，
+     *   而引擎会用它**覆盖掉 `Settings.System` 里那份正确的镜像** —— 也就是说
+     *   **连回退到旧版本都救不回来**。这条安全网就是为了消掉这个后果。
+     *
+     * ============================ 判据（顺序有意义） ============================
+     *   ① 标记已在 ⇒ 什么都不做（一次就够）；
+     *   ② 读引擎镜像：没有 ⇒ 只记标记（全新安装）；解析失败 ⇒ **不记标记**，下次再试；
+     *   ③ 镜像里的键本地**都有** ⇒ 本地是权威 ⇒ 只记标记，一个字不改；
+     *      本地**缺**任何镜像有的键 ⇒ 本地是影子 ⇒ 整份采纳（跳过 [REQUEST_ONLY_KEYS]）。
+     *
+     * ⚠️ ③ 那条判据 2026-10-03 装机实测后收紧过一次，理由（真机上踩到的后果）写在函数体里 ——
+     *   **改它之前先读那段注释**。
+     *
+     * ⚠️ 为什么来源选**引擎镜像**而不是「去找 safe-zone 那个旧文件」：
+     *   那个路径是**不可枚举**的（`/data/misc/apexdata/<uuid>/`，uuid 随机、目录 700）
+     *   ⇒ App 侧根本没有能力定位它。而镜像里放的正好就是**最近一次的全量快照**
+     *   （见 [PrefsBridge.MIRROR]），信息量等价。
+     * ⚠️ 镜像解析失败时**不记标记**（下次启动再试一次），但也**不抛** —— 读不到就当没有。
+     *
+     * ⚠️⚠️ **覆盖不到的一种升级路径（已知残留，刻意接受）**：从 **0.4.0（没有镜像那个版本）**
+     *   升上来，且配置只存在于 safe-zone 那侧时 —— 引擎镜像里没有东西可搬，
+     *   这条安全网无能为力。那条路径由 [migrateLegacyIfNeeded] 兜底一部分
+     *   （它读私有目录里那份**冻结在 09-28 之前**的旧文件，能救回模式/策略/两个开关，
+     *   **救不回** 09-28 之后才有的白名单与提示时长）。
+     *   0.5.0 及以上升上来的都走镜像那条，不受影响。
+     */
+    private fun adoptConfigFromMirrorIfNeeded(p: SharedPreferences) {
+        if (p.getBoolean(K_ADOPTED_MIRROR, false)) return
+        val c = ctx?.contentResolver ?: return
+
+        val raw = PrefsBridge.readString(c, PrefsBridge.MIRROR)
+        if (raw.isNullOrEmpty()) {
+            // 没有可搬的东西（全新安装，或引擎从没推过）⇒ 记一笔，别每次启动都去读 Settings。
+            p.edit().putBoolean(K_ADOPTED_MIRROR, true).apply()
+            Log.i(TAG, "升级迁移：没有引擎镜像可搬（全新安装？）—— 记上标记，以后不再检查")
+            return
+        }
+        val snap = ConfigChannel.decode(raw)
+        if (snap.isNullOrEmpty()) {
+            Log.w(TAG, "升级迁移：引擎镜像解析失败（长度 ${raw.length}）→ 不搬，下次启动再试")
+            return
+        }
+
+        // ★★ 判据（2026-10-03 装机实测之后**收紧过一次**）：**本地缺了镜像里有的键 ⇒ 本地是影子**。
+        //   ⛔ 别退回第一版那句「文件里有任意一个配置键就不搬」—— 它在真机上直接放行了：
+        //      legacy 时代本模块被框架自动加进自己的作用域，App 的 prefs 被 LSPosed 重定向到
+        //      safe-zone，私有目录那份于是冻结在「重定向生效之前」的旧快照上 —— 它**有配置键**，
+        //      但缺后来才新增的键（实测缺 app_whitelist_remove_inner 等 5 个）。安全网因此没出手，
+        //      界面把那份陈旧配置推给引擎、**覆盖掉 Settings 里正确的镜像**：
+        //      `app_whitelist_remove` 从 com.alibaba.wireless 变成空、`rotate_mode` 从 SEMI 变回
+        //      SYSTEM、`_inner` 那个键整条消失（日志实证：「改动:app_whitelist_remove,rotate_mode
+        //      删除:…,app_whitelist_remove_inner」）。用户的「移出名单」就是这么丢的。
+        //   ⇒ 现在判据是**双向的**：镜像该有的键本地都有 ⇒ 本地才是权威，一个字都不改；
+        //      少任何一个 ⇒ 本地不是最近那份 ⇒ 整份采纳（仍然跳过 [REQUEST_ONLY_KEYS]）。
+        //   ⚠️ 为什么"缺键"足以判定：镜像只可能由**本 App 自己推上去的快照**产生
+        //      ⇒ 镜像的键集恒 ⊆ 本地键集。缺键只可能是"这份文件不是最近那份"。
+        val missing = snap.keys.filter { it !in REQUEST_ONLY_KEYS && !p.contains(it) }
+        if (missing.isEmpty()) {
+            // 正常升级：镜像该有的键文件里都有 ⇒ 只记一笔，不动任何数据。
+            p.edit().putBoolean(K_ADOPTED_MIRROR, true).apply()
+            return
+        }
+
+        val moved = mutableListOf<String>()
+        runCatching {
+            val e = p.edit()
+            snap.forEach { (k, v) ->
+                if (k in REQUEST_ONLY_KEYS) return@forEach
+                when (v) {
+                    is String -> e.putString(k, v)
+                    is Boolean -> e.putBoolean(k, v)
+                    is Int -> e.putInt(k, v)
+                    is Long -> e.putLong(k, v)
+                    is Float -> e.putFloat(k, v)
+                    else -> return@forEach
+                }
+                moved += k
+            }
+            // ⚠️⚠️ 标记**必须**和这批值在**同一次** `edit()` 里提交：
+            //   分两次写的话，「搬了一半 + 标记已置」会让下次启动直接跳过，永远补不回来。
+            e.putBoolean(K_ADOPTED_MIRROR, true)
+            e.apply()
+        }.onFailure {
+            Log.w(TAG, "升级迁移：把引擎镜像搬回 prefs 失败（已放弃，等 App 自己推一份新的）", it)
+        }
+
+        Log.i(
+            TAG,
+            "升级迁移：本地缺 ${missing.size} 个键（$missing）⇒ 判定为陈旧影子，" +
+                "已整份采纳引擎镜像（共 ${moved.size} 个键）",
+        )
+    }
+
     // ================================================================ 初始化：引擎进程
 
     /**
      * **宿主进程**（SystemUI）初始化。必须在引擎起来之前调用。
      *
+     * ★★ **调用顺序有硬要求**：必须排在 `module/ModulePrefs.attachTransport` **之后**
+     *   （见 `EngineHost.bootOn` 的 ③ / ③.5）—— 这里读配置那一刻，镜像得已经在手上。
+     *   反过来的话它读到的一定是空的，引擎就按默认值起跑，而**没有任何一环会事后补读**
+     *   （本函数里那次 [applyFromModulePrefs] 只有这一次，之后要等一条新推送）。
+     *
      * 与 [init] 的差别：不碰任何 SharedPreferences（引擎读不到 App 的私有文件），
-     * 改为通过 [cn.dsr213.hyperplus.module.ModulePrefs] 读 App 的 prefs 文件，
-     * 并注册变更监听 —— 用户在界面改任何一项，这里毫秒级收到并灌进 StateFlow，
-     * 引擎的 `collect` 随即跟着启停 / 换策略。
+     * 改为通过 [cn.dsr213.hyperplus.module.ModulePrefs] 拿配置 —— 那份配置由 App
+     * **广播推过来**（并在引擎侧落一份 `Settings` 镜像）。订阅之后用户在界面改任何一项，
+     * 这里毫秒级收到并灌进 StateFlow，引擎的 `collect` 随即跟着启停 / 换策略。
+     *
+     * ⚠️ 订阅是**无条件**的：迁移后通道只剩这一条（nsp 已废），不存在"通道不可用时
+     *   就不订阅"这种分支 —— 那只会让"后来通道好了"也收不到东西。
      */
     fun initHost(context: Context) {
         if (hostMode) {
@@ -944,15 +1043,10 @@ object AppPrefs {
             // 标定值 / 接管标志这些"引擎的账"永远从 Settings 读，与配置通道无关
             refreshCalibFromSettings()
 
-            val ok = runCatching {
-                val p = cn.dsr213.hyperplus.module.ModulePrefs.open()
-                if (p != null) {
-                    cn.dsr213.hyperplus.module.ModulePrefs.subscribe { applyFromModulePrefs() }
-                    true
-                } else {
-                    false
-                }
-            }.getOrDefault(false)
+            // ★★ 迁移后 `open()` 只**报告状态**（手上有没有一份配置），不再返回读取器
+            //   ⇒ 「要不要订阅」这个分支**消失**了：通道就是唯一数据源，无条件订阅。
+            cn.dsr213.hyperplus.module.ModulePrefs.subscribe { applyFromModulePrefs() }
+            val ok = runCatching { cn.dsr213.hyperplus.module.ModulePrefs.open() }.getOrDefault(false)
 
             _configOk.value = ok
             _configDiag.value = cn.dsr213.hyperplus.module.ModulePrefs.diag
@@ -975,10 +1069,11 @@ object AppPrefs {
     }
 
     /**
-     * 从 App 的 prefs 全量刷新内存流。
+     * 从**配置镜像**全量刷新内存流。
      *
-     * ★ 一律全量读：配置通道的变更回调**不携带键名**（LSPosed 设计使然），
-     *   拿不到"哪个键变了"，所以不做增量。配置项不到十个，全量读的代价可忽略。
+     * ★ 一律全量读：App 推过来的本来就是一份**全量快照**（[ConfigChannel] 的设计），
+     *   而配置项不到十个，全量读的代价可忽略 —— 也就不需要"哪个键变了"那种增量协议。
+     *   ⚠️ 触发它的两条路：① `initHost` 启动时那一次；② 每次收到推送（订阅回调）。
      */
     private fun applyFromModulePrefs() {
         val p = cn.dsr213.hyperplus.module.ModulePrefs
@@ -1317,7 +1412,7 @@ object AppPrefs {
      *   用户原话「**能装上模块的手机一定有 Root，可以通过获取 root 来修改**」）。
      *   ⚠️ 这里曾经写着"写必须由引擎做、别引入 su" —— 那条**已被真机否掉**：
      *     引擎代写要过配置通道，实测出现过"请求落了盘、槽位却没变"（见当日文档）。
-     *     现在写就在 `ui.SlotCalibrationSection` 里，点一下一条命令，成败当场可见。
+     *     现在写就在 `ui.DirectionSection` 里，点一下一条命令，成败当场可见。
      *   ⚠️ 别把写挪到这条路径上来：读是**每秒轮询**的，绝不能夹带写。
      *
      * @return `null` = 读不到 / 这个键不存在（⚠️ 非 HyperOS 机型就是"键根本没有"，
@@ -1653,9 +1748,19 @@ object AppPrefs {
     /**
      * 直接解析**旧位置**的 prefs XML。
      *
-     * ⚠️ 不能用 `getSharedPreferences` 去读它：LSPosed 启用后 `getPreferencesDir()` 被
-     *   重定向到 safe-zone，普通 API 再也指不到旧目录。而 App 对自己的 `dataDir`
-     *   天然有读权限（DAC + SELinux 都放行），所以直接按路径解析文件是唯一可行且干净的办法。
+     * ⚠️ 不能用 `getSharedPreferences` 去读它（那是 2026-09-28 那版写这条注释时的理由）：
+     *   当时 LSPosed 的 nsp 把 `getPreferencesDir()` 重定向到 safe-zone，
+     *   普通 API 再也指不到旧目录 ⇒ 只能按路径直接解析。
+     *
+     * ★★ 2026-10-03 迁移后**前提变了**：本模块不再声明 `xposedsharedprefs`，
+     *   nsp 已关闭（模块整条迁到 libxposed API）⇒ `getSharedPreferences` 就落在
+     *   **本函数的同一个文件**上（`dataDir/shared_prefs/$NAME.xml`）。
+     *   ⇒ 现在它与 `p` 是**同一份数据**，这个函数退化成"换个写法再读一次"。
+     *
+     *   ⚠️ 那为什么不删掉它：**过渡期不能赌**。只要本应用进程当时仍被注入、nsp 仍在生效
+     *     （作用域重算之前的那一小段），`p` 就还在 safe-zone，而**旧私有文件里那份
+     *     pre-09-28 的配置是唯一还能救回用户模式的来源**。留着它是零成本的保险，
+     *     删掉则在那个窗口里直接丢配置。真要清理，等确认过一轮装机再说。
      */
     private fun readLegacyLocalPrefs(app: Context): Map<String, Any> {
         val f = File(app.dataDir, "shared_prefs/$NAME.xml")

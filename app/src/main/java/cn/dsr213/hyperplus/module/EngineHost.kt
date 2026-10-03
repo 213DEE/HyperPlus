@@ -1,7 +1,6 @@
 package cn.dsr213.hyperplus.module
 
 import android.content.Context
-import android.database.ContentObserver
 import android.os.Handler
 import android.os.HandlerThread
 import android.os.Looper
@@ -14,12 +13,12 @@ import cn.dsr213.hyperplus.BOOT_BREAKER_THRESHOLD
 import cn.dsr213.hyperplus.BOOT_HEALTHY_WINDOW_MS
 import cn.dsr213.hyperplus.EngineErrors
 import cn.dsr213.hyperplus.PrefsBridge
-import cn.dsr213.hyperplus.RotateMode
 import cn.dsr213.hyperplus.bootBreakerTripped
 import kotlinx.coroutines.CoroutineScope
 import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.SupervisorJob
 import kotlinx.coroutines.delay
+import kotlinx.coroutines.flow.combine
 import kotlinx.coroutines.flow.distinctUntilChanged
 import kotlinx.coroutines.flow.map
 import kotlinx.coroutines.launch
@@ -175,15 +174,20 @@ internal object EngineHost {
             .getOrElse { listOf("❌ 宿主环境准备异常：${it.javaClass.simpleName}: ${it.message}") }
         notes.forEach { Log.i(TAG, "  [env] $it") }
 
-        // ③ 配置后端 = 跨进程镜像（读 App 改的值，实时跟随）
-        AppPrefs.initHost(hostCtx)
-
-        // ★★ ③.5 配置**广播通道**（2026-10-03 新增）：注册接收者 + 把 `Settings` 里的镜像
-        //   读回来 + 必要时反向问 App 要一份。
-        //   ⚠️ 必须在 `installConfigWatcher` **之前** —— 订阅者是在那儿挂上的，
-        //   先有数据源再挂订阅者，免得刚起来那一条推送白丢（用户改了没生效最难查）。
+        // ★★ ③ 配置**广播通道**：注册接收者 + 把 `Settings` 里的镜像读回来 + 必要时反向问 App 要一份。
+        //
+        //   ⚠️⚠️ 顺序**必须**在下面的 `AppPrefs.initHost` **之前**。
+        //     迁移前是反的，那时候还有 nsp 文件通道当底，反着写只是"第一次读到旧的"；
+        //     现在通道**只剩这一条** ⇒ 先 initHost 的话，它读配置的那一刻镜像必然是空的，
+        //     引擎就此**按默认值起跑**，而下游没有任何一环会"等镜像到了再补读一次"
+        //     （`applyFromModulePrefs` 只在 initHost 里被调一次，之后要等一条新推送）。
+        //   ⚠️ 也必须在 `installConfigWatcher` **之前** —— 订阅者是在那儿挂上的，
+        //     先有数据源再挂订阅者，免得刚起来那一条推送白丢（用户改了没生效最难查）。
         runCatching { ModulePrefs.attachTransport(hostCtx) }
-            .onFailure { Log.w(TAG, "装配配置广播通道失败（退化为只靠老链路）", it) }
+            .onFailure { Log.w(TAG, "装配配置广播通道失败（配置下发会一直停在默认值）", it) }
+
+        // ③.5 配置后端 = 跨进程镜像（读 App 改的值，实时跟随）。**必须在上一行之后**。
+        AppPrefs.initHost(hostCtx)
 
         // ④ 主线程：lifecycle 与 LifecycleRegistry 都有 checkMainThread()
         Handler(Looper.getMainLooper()).post {
@@ -299,8 +303,10 @@ internal object EngineHost {
      * ★ 配置项本身（模式 / 策略 / 两个开关）的刷新由 `AppPrefs.initHost` 注册的
      *   那个订阅负责，这里只管"标定请求"这一件事 —— 两个订阅互不干扰。
      *
-     * ⚠️ 回调跑在框架的文件监控线程上（**不是** SystemUI 主线程），而标定要开相机会阻塞，
-     *   所以再丢到 [bootThread] 去做。
+     * ⚠️ 回调跑在配置通道**自建的推送线程**上（`ModulePrefs` 给接收者挂的调度器，
+     *   **不是** SystemUI 主线程）。2026-10-03 迁移前这里写的是「框架的文件监控线程」——
+     *   那条腿随 nsp 一起删了，回调来源已经换成我们自己的广播接收者。
+     *   标定要开相机会阻塞，所以再丢到 [bootThread] 去做。
      */
     private fun onConfigChanged(hostCtx: Context) {
         val raw = ModulePrefs.getString(cn.dsr213.hyperplus.PrefsBridge.CALIB_REQ, null) ?: return
@@ -380,7 +386,18 @@ internal object EngineHost {
         scope.launch {
             var last = ""
             var lastAt = 0L
-            eng.ui.map { summary(it) }.distinctUntilChanged().collect { line ->
+            // ★★ 2026-10-03（迁移后补的一格）：来源里**必须**再带上配置通道那本账。
+            //   状态串的 `cfgold=` / `cfgmsg=` 取自 `AppPrefs.configOk` / `configDiag`，
+            //   而那两个**不在** `eng.ui` 里。只跟 `ui` 走的话有一条路径会**永久滞后**：
+            //     引擎启动时手上还没有配置（cfgold=0 已上报）→ App 打开并推来一份
+            //     → 若用户**从没改过任何设置**，配置值与默认值逐项相同，
+            //       `_ui` 的各个 StateFlow 对相同值不重发 ⇒ `ui` 不变 ⇒ 摘要不重算
+            //     ⇒ 界面一直挂着「设置暂时不会生效」这条**假警报**
+            //       （而那正是本次迁移要消灭的东西：假警报比没警报更坏）。
+            //   `combine` 在任一来源变化时重算摘要，`distinctUntilChanged` 再把重复挡掉，
+            //   所以这不会让上报变频繁。
+            combine(eng.ui, AppPrefs.configOk, AppPrefs.configDiag) { ui, _, _ -> ui }
+                .map { summary(it) }.distinctUntilChanged().collect { line ->
                 val now = SystemClock.elapsedRealtime()
                 if (now - lastAt < PUBLISH_MIN_INTERVAL_MS) {
                     delay(PUBLISH_MIN_INTERVAL_MS - (now - lastAt))
@@ -503,13 +520,15 @@ internal object EngineHost {
             runCatching { ModulePrefs.attachTransport(h) }
                 .onFailure { Log.w(TAG, "熔断态：装配配置广播通道失败", it) }
         }
-        val p = runCatching { ModulePrefs.open() }.getOrNull()
-        // ⚠️ 只有「老链路的 XSharedPreferences 拿不到」**且**「广播镜像也没有」才算真不可用。
-        //   只看 `p == null` 会在"广播通道已经通了、老链路还没拆"的过渡期误判成通道全断。
-        if (p == null && !ModulePrefs.available) {
+        // ★ 2026-10-03 迁移后 `open()` 只**报告状态**、不再返回读取器（nsp 没了）⇒
+        //   判据换成"接收者装上了没有"（[ModulePrefs.transportReady]），**不是**"手上有没有配置"。
+        //   理由：熔断就发生在启动早期，那时镜像几乎必然是空的（还没从 App 那侧拿到过），
+        //   拿 `available` 判会把"能收命令"误判成"收不到"，当场把自己锁死 ——
+        //   而这条通道正是熔断态**唯一的出口**。
+        if (!ModulePrefs.transportReady) {
             Log.w(
                 TAG,
-                "熔断态：配置通道也不可用（${ModulePrefs.diag}）" +
+                "熔断态：配置广播通道没装上（${ModulePrefs.diag}）" +
                     "⇒ 收不到 App 的「重新启用」，只能靠 App 借 root 清零 / adb 清键",
             )
             return

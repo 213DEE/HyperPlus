@@ -1,19 +1,38 @@
 package cn.dsr213.hyperplus.module
 
-import android.content.Context
 import android.database.ContentObserver
+import android.content.Context
 import android.os.Handler
 import android.os.Looper
 import android.os.Process
 import android.provider.Settings
 import android.util.Log
-import de.robv.android.xposed.IXposedHookLoadPackage
-import de.robv.android.xposed.XposedHelpers
-import de.robv.android.xposed.callbacks.XC_LoadPackage
+import cn.dsr213.hyperplus.ConfigChannel
+import io.github.libxposed.api.XposedModule
+import io.github.libxposed.api.XposedModuleInterface
 import java.io.File
 
 /**
  * HyperPlus 的 LSPosed 模块入口。
+ *
+ * ============================ 新 API（libxposed，API 102，2026-10-03 迁移） ============================
+ * 本类原先实现 legacy 的 `IXposedHookLoadPackage#handleLoadPackage`，由 `assets/xposed_init` 声明入口。
+ * 2026-10-03 整体迁到 **libxposed**：入口改成继承 [XposedModule]、由
+ * `META-INF/xposed/java_init.list` 声明；作用域走 `META-INF/xposed/scope.list`；
+ * 版本走 `META-INF/xposed/module.prop`。清单里的五条 `xposed*` meta-data 全部删除。
+ *
+ * ★ 为什么非迁不可：legacy + 声明 nsp 的模块，LSPosed 会在模块页面弹
+ *   「此模块使用了已废弃且即将移除的功能」—— 那条横幅由**清单声明 + 磁盘上存在其他人可读的
+ *   xml** 共同决定，改代码消不掉，只有换 API 才能摘掉。
+ *
+ * ⚠️⚠️ **本模块一个方法 hook 都没打** —— 别把这当成"迁移没做完"：
+ *   我们注入 SystemUI 的唯一目的是**在那个进程里跑引擎**（借用它的进程身份与权限），
+ *   不是去改它的行为。因此本次迁移**不涉及** Hooker / Chain / HookBuilder / Invoker 那一整套，
+ *   只涉及"入口怎么写、配置从哪读"。真要用 hook 时的写法见 `docs/API102迁移_2026-10-03.md`。
+ *
+ * ⚠️ 硬边界（官方原话）：`targetApiVersion >= 102` 的模块在 **classloader 层面被禁止访问 legacy 包**
+ *   ⇒ `XposedHelpers` / `XSharedPreferences` / `XposedBridge.log` 一律不可用。
+ *   所以本类里那次取宿主 Application 的操作改成了**自己写反射**（见 [hostApplication]）。
  *
  * ============================ 为什么引擎跑在 SystemUI 里 ============================
  * 用户拍板方案（2026-09-25）。相比"本 App 起前台服务"的做法，这样做的好处：
@@ -38,44 +57,76 @@ import java.io.File
  *   - **每一处**都要包在 runCatching 里：任何未捕获异常都会杀掉整个进程。
  * ============================ 纪律（必须遵守） ============================
  */
-class HyperPlusModule : IXposedHookLoadPackage {
+class HyperPlusModule : XposedModule() {
 
-    override fun handleLoadPackage(lpparam: XC_LoadPackage.LoadPackageParam) {
-        // 只注入 SystemUI（与 res/values/arrays.xml 的 xposed_scope 一致）
-        if (lpparam.packageName != TARGET_PKG) return
+    /** 由 [onModuleLoaded] 记下（`PackageReadyParam` 不带进程名，而日志里需要它） */
+    @Volatile private var processName: String = "?"
 
-        Log.i(
-            TAG,
-            "★★★ HyperPlus 模块注入成功 package=${lpparam.packageName} " +
-                "process=${lpparam.processName} first=${lpparam.isFirstApplication} " +
-                "myPid=${Process.myPid()} myUid=${Process.myUid()}",
-        )
+    /**
+     * 模块被装进**本进程**时调用一次。
+     *
+     * ★ 这里只打日志，**不做任何初始化** —— 官方明确要求：
+     *   "Modules should not perform initialization before onModuleLoaded() is called"，
+     *   而反过来，真正碰宿主（SystemUI）的动作要等 [onPackageReady]。
+     */
+    override fun onModuleLoaded(param: XposedModuleInterface.ModuleLoadedParam) {
+        processName = param.processName
+        runCatching {
+            Log.i(
+                TAG,
+                "模块已加载：框架=${frameworkName} ${frameworkVersion}(code=$frameworkVersionCode, " +
+                    "api=$apiVersion) 进程=${param.processName} " +
+                    "systemServer=${param.isSystemServer} myPid=${Process.myPid()} myUid=${Process.myUid()}",
+            )
+        }
+    }
 
+    /**
+     * 宿主的 classloader 就绪、即将创建 Application 时调用。
+     *
+     * ★ 只认 `com.android.systemui`（与 `META-INF/xposed/scope.list` 一致）。
+     *   作用域理论上已经把我们限死在 SystemUI，但**这道判断必须留着** ——
+     *   它保证"哪怕用户手滑把作用域勾到别的应用，那边也不会跑起引擎来"。
+     */
+    override fun onPackageReady(param: XposedModuleInterface.PackageReadyParam) {
+        if (param.packageName != TARGET_PKG) return
+
+        runCatching {
+            Log.i(
+                TAG,
+                "★★★ HyperPlus 模块注入成功 package=${param.packageName} " +
+                    "process=$processName first=${param.isFirstPackage} " +
+                    "myPid=${Process.myPid()} myUid=${Process.myUid()}",
+            )
+        }
+
+        val loader = param.classLoader
         Handler(Looper.getMainLooper()).postDelayed({
-            runCatching { boot(lpparam) }
+            runCatching { boot(loader) }
                 .onFailure { Log.e(TAG, "模块初始化失败（已吞掉，不影响 SystemUI）", it) }
         }, START_DELAY_MS)
     }
 
     // ==================================================================== 初始化
 
-    private fun boot(lpparam: XC_LoadPackage.LoadPackageParam) {
+    private fun boot(classLoader: ClassLoader) {
         // 工作丢到独立后台线程：主机（SystemUI）启动路径上不能有重活
         val thread = android.os.HandlerThread("hyperplus-boot")
+        // ⚠️⚠️ `start()` 不能少：`HandlerThread.getLooper()` 在 `!isAlive()` 时**直接返回 null**
+        //    （不是阻塞等待），于是 `Handler(null)` 会抛
+        //    「Attempt to read from field 'MessageQueue Looper.mQueue' on a null object reference」。
+        //    2026-10-03 迁移时漏了这一行 —— 实测后果：模块注入成功但**引擎根本没起来**，
+        //    而异常被 `runCatching` 吞掉，只留一行 E，日志里看不出"引擎没跑"这件事。
         thread.start()
         Handler(thread.looper).post {
-            runCatching { doBoot(lpparam) }
+            runCatching { doBoot(classLoader) }
                 .onFailure { Log.e(TAG, "doBoot 异常（已吞掉）", it) }
         }
     }
 
-    private fun doBoot(lpparam: XC_LoadPackage.LoadPackageParam) {
+    private fun doBoot(classLoader: ClassLoader) {
         // ① 宿主（SystemUI）的 Application —— 权限与 uid 都是它的
-        val hostCtx = runCatching {
-            val atCls = XposedHelpers.findClass("android.app.ActivityThread", lpparam.classLoader)
-            val at = XposedHelpers.callStaticMethod(atCls, "currentActivityThread")
-            XposedHelpers.callMethod(at, "getApplication") as? Context
-        }.getOrNull()
+        val hostCtx = runCatching { hostApplication(classLoader) }.getOrNull()
         if (hostCtx == null) {
             Log.e(TAG, "拿不到宿主 Application，模块无法工作")
             return
@@ -84,7 +135,8 @@ class HyperPlusModule : IXposedHookLoadPackage {
         // ② 本 App 的 Context —— 用来定位我们自己的资源与 native 库。
         //    走 HostEnv：它会把上下文包一层，修掉 createPackageContext() 的
         //    getApplicationContext() == null（ML Kit 会在这里 NPE，实测踩过）
-        val appCtx = HostEnv.appContext(hostCtx, APP_PKG)
+        //    ⚠️ 包名常量只有一份真值（[ConfigChannel.APP_PKG]），别在这儿再写一份字面量。
+        val appCtx = HostEnv.appContext(hostCtx, ConfigChannel.APP_PKG)
 
         Log.i(
             TAG,
@@ -106,8 +158,32 @@ class HyperPlusModule : IXposedHookLoadPackage {
             .onFailure { Log.e(TAG, "安装自检触发失败（已吞掉）", it) }
 
         // ⑤ ★ 引擎搬进 SystemUI —— 本模块的主线任务
-        runCatching { EngineHost.start(hostCtx, appCtx, lpparam.classLoader) }
+        runCatching { EngineHost.start(hostCtx, appCtx, classLoader) }
             .onFailure { Log.e(TAG, "EngineHost 启动失败（已吞掉）", it) }
+    }
+
+    /**
+     * 取宿主进程的 `Application` —— 即 `ActivityThread.currentActivityThread().getApplication()`。
+     *
+     * ★★ 这里为什么是**手写反射**而不是一行 `XposedHelpers.callStaticMethod(...)`：
+     *   新 API 下 `de.robv.android.xposed.*` **连 import 都不允许**（见类注释的硬边界），
+     *   而且官方明确 **不再提供 `XposedHelpers`**（替代品 `libxposed/helper` 官方标为
+     *   "Developing"，暂不引入）。
+     *
+     * ⚠️ **行为与旧写法等价**：`XposedHelpers.findClass/callStaticMethod/callMethod` 内部也就是
+     *   `Class.forName(name, false, loader)` + `getDeclaredMethod` + `setAccessible(true)`。
+     *   旧版跑通了，这套就一样跑得通（隐藏 API 限制在 LSPosed 注入的进程里本就已解除）。
+     *   万一将来这里被拦，改用官方 `getInvoker(method)`（框架侧调用，绕过限制）即可：
+     *   `getInvoker(atCls.getDeclaredMethod("currentActivityThread")).invoke(null)`。
+     */
+    private fun hostApplication(classLoader: ClassLoader): Context? {
+        val atCls = Class.forName("android.app.ActivityThread", false, classLoader)
+        val at = atCls.getDeclaredMethod("currentActivityThread")
+            .apply { isAccessible = true }
+            .invoke(null)
+        return atCls.getDeclaredMethod("getApplication")
+            .apply { isAccessible = true }
+            .invoke(at) as? Context
     }
 
     /**
@@ -153,7 +229,9 @@ class HyperPlusModule : IXposedHookLoadPackage {
 
     companion object {
         const val TAG = "HyperPlusModule"
-        const val APP_PKG = "cn.dsr213.hyperplus"
+
+        // ★ 2026-10-03：这里原先有一个 `APP_PKG` 常量，现已删除 —— 包名只留一份真值
+        //   [ConfigChannel.APP_PKG]（本类在 [doBoot] 里直接引用它）。
         private const val TARGET_PKG = "com.android.systemui"
 
         /** 开发用复测通道的设置键（见 installSelfCheckTrigger） */

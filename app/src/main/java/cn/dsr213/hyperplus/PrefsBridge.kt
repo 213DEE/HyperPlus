@@ -9,12 +9,12 @@ import android.util.Log
  *
  * ============================ 这个类现在管什么（2026-09-28 重构后） ============================
  * 改造前它是「App ⇄ SystemUI 的**双向配置总线**」，代价是 App 侧必须借 root 写非公开键。
- * 现在配置改走文件（App 的 prefs，见 [cn.dsr213.hyperplus.module.ModulePrefs]），
- * 本类只剩两件**都不需要 root** 的事：
+ * 现在配置走「App 的 prefs → 广播快照 → 引擎镜像」（见 [ConfigChannel] /
+ * [cn.dsr213.hyperplus.module.ModulePrefs]），本类只剩两件**都不需要 root** 的事：
  *
  * | 组 | 谁写 | 谁读 | 走哪 |
  * |---|---|---|---|
- * | **配置键** [MODE_INNER] [STRATEGY] [HANDOFF_ROTATE] [GATE] [CALIB_REQ] [HINT_TEST] [WHITELIST_ADD] [WHITELIST_REMOVE] | App | 引擎 | App 的 prefs 文件（**只借用这里的键名常量**） |
+ * | **配置键** [MODE_INNER] [STRATEGY] [HANDOFF_ROTATE] [GATE] [CALIB_REQ] [HINT_TEST] [WHITELIST_ADD] [WHITELIST_REMOVE] | App | 引擎 | App 的 prefs ⇒ **广播快照**（本类只借用键名常量） |
  * | **引擎的账** [SIGN] [OFFSET] [RESTORE] [TAKEOVER] [CAMID] | 引擎 | 两边 | `Settings.System`（引擎是特权包，直写免 root） |
  * | **状态键** [STATE] [HEARTBEAT] [CALIB_RESULT] | 引擎 | App | `Settings.System` |
  *
@@ -60,8 +60,9 @@ internal object PrefsBridge {
      * 外屏模式：`rotate_mode_outer`。
      *
      * ⛔ **已退役**（2026-09-29，外屏旋转增强整个删掉）：不再读写。
-     *   只在两处当"老文件的指纹"用 —— [AppPrefs.migrateLegacyIfNeeded] 的"迁移过了吗"
-     *   判据、[cn.dsr213.hyperplus.module.ModulePrefs] 的"这文件像不像我们的"兜底。
+     *   只在 [AppPrefs.migrateLegacyIfNeeded] 里当"老文件的指纹"用（"迁移过了吗"判据）。
+     *   ⚠️ 2026-10-03 迁移前它还有**第二个**用途 —— `module/ModulePrefs` 拿它判"这文件像不像
+     *     我们的"。引擎改走广播快照之后那条腿已随 nsp 一起删除，**别再照旧描述去找它**。
      *   ⛔ 别把它当"还有一个隐藏的配置层"再读回来。
      */
     const val MODE_OUTER = "rotate_mode_outer"

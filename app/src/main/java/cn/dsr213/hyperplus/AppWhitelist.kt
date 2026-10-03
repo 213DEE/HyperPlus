@@ -174,10 +174,13 @@ internal object AppWhitelist {
     /**
      * 集合 → 单键字符串（每行一个包名，排序后）。
      *
-     * ★ 为什么不用 `putStringSet`：配置通道那条腿（`XSharedPreferences`）读的是**文件内容**，
-     *   而 Set 在 XML 里是嵌套标签；同时引擎侧的变更检测是"整键字符串比对"（见
-     *   `ModulePrefs.installPollFallback`）—— 用单个字符串，变更就天然是一个可打印的差异，
-     *   诊断日志里能直接看出"改了哪几个包"。
+     * ★ 为什么不用 `putStringSet`：名单要穿过一条**序列化**的通道（[ConfigChannel] 的
+     *   长度前缀格式），而 `Set` 在 `SharedPreferences` 的 XML 里是嵌套标签、
+     *   在那套格式里也只能退化成 `toString()`；同时引擎侧的"内容变没变"判据是
+     *   **整快照比对**（见 `ModulePrefs.advanceBaseline`）—— 用单个字符串，
+     *   变更就天然是一个可打印的差异，诊断日志里能直接看出"改了哪几个包"。
+     *   ⚠️ 2026-10-03 之前这里的理由挂在 nsp 那条腿（读的是文件内容）上，那条腿已删除；
+     *     换成广播快照之后结论**没变**（仍然要单键字符串），但依据换了，别再引旧依据。
      */
     fun encode(s: Set<String>): String = s.sorted().joinToString("\n")
 

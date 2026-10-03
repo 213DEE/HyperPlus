@@ -99,7 +99,6 @@ class MainActivity : ComponentActivity() {
                     probed = probed,
                     hosted = hosted,
                     hostState = hostState,
-                    onCalibrate = { step -> calibrate(step) },
                     onOpenSettings = { openSystemSettings() },
                     // ★ 语言改了要**重建**才能生效（语言装在 base context 上，
                     //   而那个时刻一个 Activity 只有一次 —— 见 LanguagePage 类注释）。
@@ -132,46 +131,19 @@ class MainActivity : ComponentActivity() {
         AppPrefs.refreshCalibFromSettings()
     }
 
-    // ================================================================ 标定（一律交给引擎）
+    // ================================================================ 标定（2026-10-04 起：引擎全自动）
 
-    /**
-     * 标定**只有一个去向**：请 SystemUI 里的引擎采样。
-     *
-     * ★ 为什么 App 不能自己标：采样要真的开相机，而相机在引擎手里（SystemUI 进程）。
-     *   改造前"单机模式"下 App 会自己开相机 —— 那条路连同 App 侧引擎一起删掉了。
-     */
-    private fun calibrate(step: Int) {
-        io.execute {
-            val r = runCatching { ModuleLink.requestCalibration(this, step) }
-                .getOrElse { ModuleLink.CalibStatus.UNAVAILABLE }
-            // ★ 记一笔分步进度（2026-10-03）：界面靠它显示"①/② 做完没"。
-            //   ⚠️ 判据是**引擎的回报**，不是"用户点了按钮" —— 点了但没采到脸
-            //     （NO_FACE / BAD_ANGLE）不算完成。见 `AppPrefs.calibStep1Done`。
-            //   ⚠️ 必须在 IO 线程（它会写 prefs），所以放在 runOnUiThread 之前。
-            AppPrefs.recordCalibStep(step, r == ModuleLink.CalibStatus.OK)
-            runOnUiThread {
-                toast(calibMessage(r))
-                refreshHostState()
-            }
-        }
-    }
-
-    /**
-     * 标定结果的提示文案。
-     *
-     * ⚠️ 归到 string 资源之后**要注意调用线程**：它现在在 `io` 线程里被调用
-     *   （见 [calibrate]），而 `getString` 是线程安全的，没问题；
-     *   但**不能**在这里用 `stringResource`（那是 Composable 专用）。
-     */
-    private fun calibMessage(r: ModuleLink.CalibStatus): String = getString(
-        when (r) {
-            ModuleLink.CalibStatus.OK -> R.string.calib_ok
-            ModuleLink.CalibStatus.NO_FACE -> R.string.calib_no_face
-            ModuleLink.CalibStatus.BAD_ANGLE -> R.string.calib_bad_angle
-            ModuleLink.CalibStatus.TIMEOUT -> R.string.calib_timeout
-            ModuleLink.CalibStatus.UNAVAILABLE -> R.string.calib_unavailable
-        },
-    )
+    // 这里原来有 `calibrate(step)` 与 `calibMessage(r)`：用户点「校准」时请引擎开相机采样，
+    // 再按引擎回报弹一句 toast。
+    //
+    // ★★★ **2026-10-04 随校准入口一起删除**。用户原话：「不要用摄像头来校准了，用重力传感器」。
+    //   而引擎里 `AdaptiveEngine.noteSignEvidence`（2314 行被调用）本来就在拿**重力扇区**
+    //   持续校验符号位 —— 等于重力记一票、等于镜像记一票，攒够 `SIGN_MIN_SAMPLES = 20`
+    //   且反号证据 ≥ 3 倍就自动翻转 `sign` 并落盘。⇒ 手动入口是多余的，删掉不损失能力。
+    // ⛔ 别把它加回来；完整理由见 `ui/DirectionSection` 的类注释。
+    //
+    // ⚠️ 保留未删的：`AppPrefs.persistCalibration` / `refreshCalibFromSettings` ——
+    //   它们服务的是**自动**那条路（引擎自己写、界面自己读），仍然是活的。
 
     // ================================================================ 生命周期
 

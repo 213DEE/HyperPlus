@@ -28,9 +28,10 @@ import android.service.quicksettings.TileService
  *   所以控制中心会有两个旋转开关，改一个另一个的图标也会跟着变。
  *   这是绕不开的——除非将来做成真模块直接替换系统那个 Tile。
  *
- * 引擎侧通过**配置文件**跟随模式变化（App 写自己的 prefs，SystemUI 里的引擎用
- * LSPosed 的 XSharedPreferences 通道监听文件变更），所以这里改了模式，
- * 正在运行的引擎会立刻跟随启停，不需要 App 主动通知 —— App 侧压根没有引擎实例。
+ * 引擎侧跟随模式变化的通道是**广播**（[ConfigChannel]）：App 每改一次设置就把整份配置
+ * 推给 SystemUI 里的引擎（迁移 nsp 之前是"引擎监听文件变更"，2026-10-03 换掉了），
+ * 所以这里改了模式，正在运行的引擎会立刻跟随启停，不需要 App 主动通知 ——
+ * App 侧压根没有引擎实例。
  */
 class RotateTileService : TileService() {
 

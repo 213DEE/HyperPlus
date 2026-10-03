@@ -62,7 +62,6 @@ fun HyperPlusApp(
     /** 引擎是否在线（心跳够新鲜） */
     hosted: Boolean,
     hostState: ModuleLink.State?,
-    onCalibrate: (Int) -> Unit,
     /** 打开系统设置（用于引导用户去关掉「注视感知」，见旋转增强页的使用提醒） */
     onOpenSettings: () -> Unit,
     /**
@@ -213,12 +212,11 @@ fun HyperPlusApp(
                 )
             }
             entry<Route.Settings> {
-                SettingsPage(onOpen = ::go)
+                SettingsPage(hostState = hostState, onOpen = ::go)
             }
             entry<Route.Rotation> {
                 RotationPage(
                     onBack = { backStack.removeLastOrNull() },
-                    onCalibrate = onCalibrate,
                     onOpenSettings = onOpenSettings,
                 )
             }

@@ -2,13 +2,11 @@ package cn.dsr213.hyperplus.ui
 
 import androidx.compose.foundation.layout.padding
 import androidx.compose.runtime.Composable
-import androidx.compose.runtime.collectAsState
-import androidx.compose.runtime.getValue
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.res.stringResource
 import androidx.compose.ui.unit.dp
 import androidx.compose.ui.unit.sp
-import cn.dsr213.hyperplus.AppPrefs
+import cn.dsr213.hyperplus.ModuleLink
 import cn.dsr213.hyperplus.R
 import top.yukonga.miuix.kmp.basic.Scaffold
 import top.yukonga.miuix.kmp.basic.Text
@@ -32,19 +30,26 @@ import top.yukonga.miuix.kmp.theme.MiuixTheme
  *   否则用户会一路点进去改半天开关，才发现改的根本没生效。
  *   ⚠️ 这也是旧版主页上那块卡片，只是**只在出问题时才渲染**（正常情况下一个字都不占）。
  *
+ * ★★ 2026-10-03（libxposed 迁移）**判据换人**：此前它看的是 `AppPrefs.appChannelOk`
+ *   —— "本应用进程有没有被 LSPosed 注入"，靠能不能以 `MODE_WORLD_READABLE` 打开 prefs
+ *   来推断。迁移后引擎不再读 prefs 文件（改由 App 推广播），App **也就不再需要被注入**
+ *   ⇒ 那个标志恒为假、界面会挂着一条**永久的假警报**。现在改看**引擎自己回传的那一格**
+ *   （状态摘要里的 `cfgold` ⇒ [ModuleLink.State.cfgOk]）—— 它才是"改设置到底生不生效"
+ *   的唯一真值来源，而且两侧共用同一格，不会出现"App 说好、引擎说坏"。
+ *
  * ★ 2026-10-03 多语言：本页全部文案已改为 `stringResource`（硬编码中文一条不留）。
  *   ⚠️ 新加文案时**必须**同时补 `values` / `values-zh-rCN` / `values-zh-rTW` 三套，
  *     漏了就会在对应语言下掉回默认（英文）—— `_probe/check_strings_parity.py` 专查这个。
  */
 @Composable
 internal fun SettingsPage(
+    hostState: ModuleLink.State?,
     onOpen: (Route) -> Unit,
 ) {
-    // ★ 配置通道的**本进程**那一侧（App 有没有被 LSPosed 注入）。
-    //   引擎侧那一半（读不读得到文件）由状态摘要回传，属于「当前状态 / 诊断」的内容，
-    //   在这里不重复报 —— 这一页只回答"我该不该现在就去改设置"。
-    val appChannelOk by AppPrefs.appChannelOk.collectAsState()
-    val appChannelDiagRes by AppPrefs.appChannelDiagRes.collectAsState()
+    // ★ 配置通道的判据 = 引擎回传的 `cfgold`（见类注释）。三种取值都要有交代：
+    //   `null`（还没读到状态摘要 / 老格式里没这一项）**也提示** —— 这一页不假装它是好的，
+    //   只是措辞上不说"引擎读不到"，因为那还没有证据。
+    val cfgOk = hostState?.cfgOk
 
     Scaffold(
         topBar = {
@@ -57,24 +62,16 @@ internal fun SettingsPage(
     ) { padding ->
         HomeColumn(padding) {
             // ------------------------------------------------ 配置通道没打通时，先说这件事
-            if (!appChannelOk) {
+            // ⚠️ 判据是 `!= true`：`null` 与 `false` 都要提示。`null` 意味着"按现有证据
+            //   它没在工作"，而这一页的职责就是挡住"改了没用的开关"，宁可先说一句。
+            if (cfgOk != true) {
                 TextCard(title = stringResource(R.string.settings_channel_broken)) {
-                    // ⚠️ 不要写成 `appChannelDiag.ifEmpty { stringResource(...) }`：
-                    //   虽然 `ifEmpty` 是 inline 函数、Compose 允许在 inline lambda 里调
-                    //   composable，但那是**边界写法** —— 一旦哪天它被换成非 inline 的
-                    //   `orEmptyOnce()` 之类就会静默编译失败。显式 `if` 没有这个隐患。
-                    // ⚠️ `0` = `AppPrefs.init` 还没跑过（见 [AppPrefs.appChannelDiagRes]）。
-                    val channelMsg = if (appChannelDiagRes != 0) {
-                        stringResource(appChannelDiagRes)
-                    } else {
-                        stringResource(R.string.settings_channel_default)
-                    }
                     Text(
-                        text = channelMsg,
+                        text = stringResource(R.string.settings_channel_default),
                         color = MiuixTheme.colorScheme.onSurface,
                         style = MiuixTheme.textStyles.paragraph,
                     )
-                    // ⚠️ 2026-10-01 精简：上面那条 [appChannelDiag] 已经说了"怎么办"，
+                    // ⚠️ 2026-10-01 精简：上面那条已经说了"现在是什么情况"，
                     //   这里只需补一句**影响**（所有开关都不生效）+ 那句最容易被忽略的操作提示。
                     // ⚠️ 2026-10-02：把"修法："换成破折号 —— 少一个冒号级的停顿，读起来更顺。
                     // ⚠️ 2026-10-03：原来这里是两段字符串字面量相加（中间那个换行是为了
