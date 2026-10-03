@@ -74,6 +74,53 @@
 > ⚠️ **唯一的例外是「默认方向」**：折叠屏的展开方向由系统的一个私有槽位决定，读它、写它
 > 都需要 root。不用这个功能就完全不需要 root，界面里带 root 字样的按钮也不去点它即可。
 
+#### 装机前检查（先对一遍，免得白折腾）
+
+| 需要 | 具体 |
+|---|---|
+| root | 任意（KernelSU / Magisk …） |
+| LSPosed | **需支持 Xposed API 93**（本模块声明 `xposedminversion=93`；现行的 LSPosed 2.x 都满足，1.8 及更早的版本不行） |
+| Android | **11 及以上**（本模块 `minSdk 30`） |
+| CPU | **arm64-v8a**。APK 只带这一套原生库 ⇒ **纯 32 位机型直接装不上** |
+| 摄像头 | **必须有前置摄像头**（清单里声明为必需硬件） |
+| 空间 | APK 约 40 MB，装机后还会解出约 8.6 MB 原生库 |
+
+> 除此之外**没有别的依赖**：不下载模型（人脸模型打在 APK 里）、不需要 GMS、也不需要 HyperOS
+> （只有「默认方向」那一项用到系统私有键，非 HyperOS 上它读不到值、界面会如实说明）。
+
+#### 装完出问题了怎么办
+
+> **先排除一个误会：拒绝 root 权限不会导致崩溃。** 整个应用里只有「默认方向」这张卡会用到 root，
+> 而且只在你点它的那一刻才会弹授权框。拒绝授权（或这台机器上根本没有 `su`）的唯一后果，是那一项
+> 改不了 —— 界面会直接告诉你失败，不会崩。**模块本身（跑在系统界面进程里的那部分）一行 root
+> 代码都没有。** 所以如果崩溃是"装完什么都没干就发生了"，root 一定不是原因。
+
+**症状一：安装后系统界面（状态栏 / 导航栏）反复重启，甚至进不了桌面。**
+
+先把模块停掉 —— 这是唯一要做的紧急动作：
+
+- 在 LSPosed 管理器里**关掉本模块**，然后重启一次系统界面（或整机）；
+- 管理器已经进不去的话：LSPosed 自带崩溃保护，通常在连续崩溃后**会自己把模块禁用**，等它一两轮；
+- 系统完全起不来时，用 Magisk / KernelSU 的**安全模式**（开机时按住音量减）进入，在那里关掉模块。
+
+**为什么是「反复」重启**：本模块的引擎住在系统界面进程里，而「出错就停用」这个开关只在
+**当前这一次系统界面进程**里有效 —— 进程一重启它就复位，于是同一个故障会被一遍遍重放。
+我们正在把它改成「连续失败就熔断、不再自动启动」。
+
+**要反馈的话，请附上这三样**（有一样就够定位）：
+
+```bash
+adb logcat -b crash -d                       # Java 崩溃栈（能看出是哪个进程崩的）
+adb logcat -b all -d | grep -i hyperplus     # 能看出启动走到哪一步
+adb shell ls -l /data/tombstones/            # 这里有文件 = native 崩溃，不是 Java 异常
+```
+
+**症状二：LSPosed 里写着「此模块使用了已废弃且即将移除的功能」。**
+
+这是 **LSPosed 自己的提示，不是故障** —— 它指的是本模块用的配置文件共享通道
+（New XSharedPreferences）已被官方标记为废弃、计划在 LSPosed 2.3.0 移除。
+**现在功能一切正常**，不需要做任何操作。
+
 ### 三种模式，内屏 / 外屏各存一份
 
 | 档位 | 判据 | 开摄像头？ | 谁拍板 |
@@ -255,6 +302,10 @@ app/src/main/java/cn/dsr213/hyperplus/
 - 引擎常驻在系统界面进程里，已真机实测（**回桌面 / 锁屏 / 强杀 App 后引擎仍在工作**），
   但它**依赖 root 与 LSPosed**，而且**模块没启用 / 作用域漏勾「系统界面」= 功能不可用**
   （这是"引擎只有一个、且住在系统进程里"的必然含义，没有退路可走）。
+- ⚠️ **已知风险（2026-10-03 收到两例反馈）**：引擎**装机后无需用户操作**就会在系统界面进程里
+  自动启动（这就是"常驻"的代价：与系统版本强耦合）。因此本模块一旦在某台设备上不兼容，
+  表现就是**「装完就崩、系统界面反复重启」，而用户还没打开过 App**。急救步骤与取证命令
+  见上面的「装完出问题了怎么办」。
 - **已知盲区**：触发源是朝向传感器（设备动了才唤醒）。手机架在桌上不动、只有人头转过去的情况**不会触发** —— 目前**没有**"屏幕亮起 / 解锁"之类的兜底触发源。
 - 部分机型的朝向传感器在熄屏时不唤醒，触发层可能收不到事件。
 - 方向判定的符号与相位依赖具体机型的摄像头朝向与镜像方式，因此提供**两步标定**（竖屏基准 + 左横屏定方向），而不是把参数硬编码。
@@ -355,6 +406,56 @@ install.
 > ⚠️ **The one exception is "Default orientation"**: a foldable's unfold orientation is governed by a
 > private system slot, and both reading and writing it require root. Skip that feature and root is
 > never needed — just don't tap the buttons marked as requiring root.
+
+#### Before you install (check these first)
+
+| Requirement | Detail |
+|---|---|
+| root | any (KernelSU / Magisk …) |
+| LSPosed | must support **Xposed API 93** (this module declares `xposedminversion=93`; every current LSPosed 2.x does, 1.8 and older does not) |
+| Android | **11 or newer** (`minSdk 30`) |
+| CPU | **arm64-v8a** — the APK ships only that ABI, so **32-bit-only devices cannot install it at all** |
+| Camera | a **front camera is required** (declared as a required hardware feature) |
+| Storage | ~40 MB for the APK, plus ~8.6 MB of native libraries unpacked at install time |
+
+> Nothing else is needed: no model download (the face model ships inside the APK), no Google Play
+> Services, no HyperOS (only "Default orientation" touches a private system key; elsewhere it reads
+> nothing and the UI says so).
+
+#### If something goes wrong after installing
+
+> **Rule out one misconception first: denying root access does not cause a crash.** In the whole app
+> only the "Default orientation" card uses root, and only at the moment you tap it — that is when the
+> prompt appears. Refusing it (or having no `su` on the device at all) only means that one setting
+> cannot be changed: the UI tells you it failed. **The module itself — the part running inside the
+> SystemUI process — contains no root code at all.** So if the crash happens "right after installing,
+> without touching anything", root is definitely not the cause.
+
+**Symptom 1: after installing, SystemUI (status bar / navigation bar) keeps restarting — sometimes to the point where the launcher never comes up.**
+
+Stop the module first — that is the only urgent step:
+
+- disable this module in the LSPosed manager, then restart SystemUI (or the device);
+- if the manager is unreachable: LSPosed has crash protection and normally **disables the module by itself** after repeated crashes — give it a round or two;
+- if the system never comes back, boot into Magisk / KernelSU **safe mode** (hold Volume Down during boot) and disable the module there.
+
+**Why it restarts "repeatedly"**: the engine lives inside the SystemUI process, and its "stop on any
+error" switch only holds for **the current SystemUI process** — a restart resets it, so the same fault
+is replayed over and over. We are changing it to a persisted breaker that stops auto-starting.
+
+**To report it, please attach these** (any one of them helps):
+
+```bash
+adb logcat -b crash -d                       # Java crash stack (shows which process died)
+adb logcat -b all -d | grep -i hyperplus     # how far engine startup got
+adb shell ls -l /data/tombstones/            # a file here = native crash, not a Java exception
+```
+
+**Symptom 2: LSPosed shows "this module uses a deprecated feature that will be removed".**
+
+That is **LSPosed's own notice, not a fault** — it refers to the config-sharing channel
+(New XSharedPreferences) that upstream has deprecated and plans to remove in LSPosed 2.3.0.
+**Everything works today** and no action is needed.
 
 ### Three modes, stored separately for each panel
 
@@ -550,6 +651,11 @@ two-step calibration.
   LSPosed** — and **if the module is not enabled, or "System UI" is missing from the scope, the
   feature simply does not work** (that is the necessary consequence of having exactly one engine, living
   in the system process; there is no fallback path).
+- ⚠️ **Known risk (two reports, 2026-10-03)**: the engine **auto-starts inside the SystemUI process
+  with no user action** (that is the price of being resident: tight coupling with the system
+  version). So if this module is incompatible with a given device, the symptom is **"crashes right
+  after installing, SystemUI restarts in a loop"** — before the user has ever opened the app.
+  Recovery steps and log commands are in "If something goes wrong after installing" above.
 - **Known blind spot**: the trigger is the orientation sensor, which only fires when the *device* moves. Phone propped on a desk while only your head turns **will not trigger** — there is currently **no** screen-on/unlock fallback trigger.
 - On some devices the orientation sensor does not wake while the screen is off, so the trigger layer may receive nothing.
 - The sign and phase of the orientation mapping depend on the specific device's camera orientation and mirroring, so the project offers **two-step calibration** (portrait baseline + left-landscape axis) instead of hard-coded parameters.
