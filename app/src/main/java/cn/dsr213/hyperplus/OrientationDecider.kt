@@ -70,16 +70,30 @@ class OrientationDecider(
 ) {
 
     data class Config(
-        /** 指数平滑系数（0~1，越大越跟手） */
-        val emaAlpha: Float = 0.35f,
+        /**
+         * 指数平滑系数（0~1，越大越跟手）。
+         *
+         * ★ 0.35 → **0.55**（2026-09-25，用户反馈"响应太慢、不够灵敏"）。
+         *   旧值下 EMA 要 ~7 帧才收敛到新姿势，而一轮 burst 现在只有 10 帧（预热 2 帧）
+         *   ⇒ 平滑本身就成了瓶颈：票还没攒够，姿势已经被拖在后面了。
+         *   0.55 的收敛时间约 4 帧，既保住"压掉单帧抖动"的本职，
+         *   又不再吃掉整轮的响应预算。
+         *   ⚠️ 若真机出现"方向开始反复横跳"，第一个该回调的就是这里。
+         */
+        val emaAlpha: Float = 0.55f,
         /**
          * 时间保持：新扇区要连续成立这么久才提交。
          *
-         * ★ 350ms → 250ms：绝对映射下 holdMs 只承担「挡边界抖动」这一个职责，
-         *   不再承担「减少误切」—— 因为已经没有死区了。250ms ≈ 4 帧 @16ms，
-         *   足以滤掉角度在 45° 边界上的一次抖动，又不会让人觉得迟钝。
+         * ★ 350ms → 250ms → **150ms**：绝对映射下 holdMs 只承担「挡边界抖动」这一个职责，
+         *   不再承担「减少误切」—— 因为已经没有死区了。150ms 足以滤掉角度在 45° 边界上
+         *   的一次抖动，同时又不再成为"转了没反应"的元凶。
+         *
+         * ⚠️ 注意 holdMs **只管状态机那条路**；只要本轮投票够了
+         *   （[MIN_VOTES] = 3），
+         *   [cn.dsr213.hyperplus.AdaptiveEngine.applyRotationIfNeeded] 会立刻写，
+         *   不经过这里。降它是为了"票不足时"的兜底也别太迟钝。
          */
-        val holdMs: Long = 250L,
+        val holdMs: Long = 150L,
         /**
          * 边界滞回带（度）—— 切换点从 45° 推到 `45 + hysteresisDeg`，回切点压到
          * `45 - hysteresisDeg`。
@@ -179,6 +193,15 @@ class OrientationDecider(
     ): Result {
         if (roll == null) {
             val lost = lastFaceAt > 0 && nowMs - lastFaceAt > cfg.faceLostMs
+            // ★★ 2026-10-02：**没脸就把 lastNorm 清掉**，不许留上一次的值。
+            //   为什么必须清：`lastNormalized` 是「实时角度」那一行读数（`norm` 字段）的来源，
+            //   而 `PrefsBridge.LIVE_ANGLE` 的契约写的是「没脸时为空串」。原来不清，
+            //   后果是**实测到的**（00:39:30 起连续 130+ 秒 `norm=0.6` 而人脸字段已空）：
+            //   界面会一直显示一个**假的角度**，用户照着它做的判断全是错的 ——
+            //   这比显示"读不到"危险得多。
+            //   ⚠️ 决策路径不受影响：`lastNorm` 只被 [AdaptiveEngine.publishLiveAngle] 读，
+            //     写方向用的是 `committed`（由 `roll != null` 的分支维护）。
+            lastNorm = Float.NaN
             return Result(
                 rawRoll = Float.NaN,
                 smoothedRoll = smoothed ?: Float.NaN,

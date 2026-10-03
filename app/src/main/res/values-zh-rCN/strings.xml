@@ -1,0 +1,357 @@
+<?xml version="1.0" encoding="utf-8"?>
+<!--
+  ★ 简体中文。文案与 2026-10-03 之前硬编码在 Kotlin 里的**完全一致**
+    （用户此前多轮打磨过的说法，⛔ 不要顺手"优化"措辞）。
+
+  ⚠️ 三条语言名（`lang_name_zh_hans` / `zh_hant` / `en`）在默认资源里标了
+    `translatable="false"` ⇒ **不要在这里重复**，重复了反而会被 lint 报冲突。
+
+  ⚠️ 这里的键必须与 `values/strings.xml` **一一对应**，漏一个就会在简体界面下
+    掉回英文。`_probe/check_strings_parity.py` 专查这件事。
+-->
+<resources>
+    <string name="app_name">HyperPlus</string>
+    <string name="tile_label">自适应旋转</string>
+
+    <!-- ================================================ 语言选择器 -->
+    <string name="lang_name_auto">跟随系统</string>
+
+    <string name="lang_page_title">语言</string>
+    <string name="lang_page_summary">界面语言</string>
+    <string name="lang_page_desc">选择本应用的界面语言。</string>
+    <string name="lang_page_hint">改完立即生效。</string>
+
+    <!-- ================================================ 底栏 -->
+    <string name="tab_function">功能</string>
+    <string name="tab_settings">设置</string>
+
+    <!-- ================================================ 主页：设置 -->
+    <string name="settings_title">设置</string>
+    <string name="settings_channel_broken">⚠️ 设置暂时不会生效</string>
+    <string name="settings_channel_default">本应用的系统模块没有启用。</string>
+    <string name="settings_channel_fix">修好之前所有开关都不生效 —— 在 LSPosed 里把 HyperPlus 自己也勾进作用域（不只是「系统界面」）。</string>
+    <!-- 配置通道自检的**原因**（2026-10-03 从 AppPrefs 的硬编码中文搬来，字面量逐字一致） -->
+    <string name="channel_ready">已就绪：设置写在共享目录里，旋转服务读得到</string>
+    <string name="channel_not_ready">未就绪：设置只写进了应用私有目录，旋转服务读不到。请在 LSPosed 里把 HyperPlus 自己也勾进作用域，然后重启本应用。</string>
+    <string name="settings_section_monitor">监控与排查</string>
+    <string name="settings_status_title">当前状态</string>
+    <string name="settings_status_summary">运行状态 · 方向控制 · 当前方向 · 半自动按钮</string>
+    <string name="settings_diag_title">诊断</string>
+    <string name="settings_diag_summary">触发与让位 · 识别指标 · 数据记录 · 最近事件</string>
+    <string name="settings_section_app">应用</string>
+    <string name="settings_about_title">关于</string>
+    <string name="settings_about_summary">版本 · 检查更新 · 运行方式 · 免责声明</string>
+    <string name="settings_language_title">语言</string>
+    <string name="settings_language_summary">跟随系统 · 简体中文 · 繁體中文 · English</string>
+
+    <!-- ================================================ 二级页：关于 -->
+    <string name="about_title">关于</string>
+    <string name="about_version">版本</string>
+    <string name="about_checking">（检查更新中…）</string>
+    <string name="about_run_mode">运行方式</string>
+    <string name="about_run_mode_value">后台常驻，不用一直开着本应用</string>
+    <string name="about_check_update">检查更新</string>
+    <string name="about_disclaimer_title">免责声明</string>
+    <string name="about_disclaimer_body">本应用通过 LSPosed 调整屏幕方向，属于非官方改造：不改系统文件，核心功能也不需要 root，但请了解风险后使用。出问题时在 LSPosed 里停用模块即可恢复原状。</string>
+
+    <!-- ================================================ 主页：功能 -->
+    <string name="function_title">功能</string>
+    <string name="function_section_rotation">旋转</string>
+    <string name="function_section_experimental">实验</string>
+    <string name="function_rotation_title">旋转增强</string>
+    <string name="function_rotation_summary">内屏：%1$s；外屏交给系统处理（模式 / 悬浮按钮 / 方向校准 / 应用名单）</string>
+    <string name="function_state_probing">正在读取运行状态…</string>
+    <string name="function_state_noservice">读不到旋转服务</string>
+    <string name="function_state_offline">旋转服务已离线</string>
+    <string name="function_state_running">运行中</string>
+    <string name="function_state_probing_long">正在读取旋转服务的状态…</string>
+    <string name="function_no_report">还没有收到任何状态回报。最常见的原因是模块没在 LSPosed 里启用（那样只能保存设置，转不动屏幕）。</string>
+    <string name="function_lost">最后一次响应在 %1$d 秒前（超过 %2$d 秒视为离线）；系统界面重启后会自动恢复，稍等即可。</string>
+    <string name="function_mode_system">当前模式是「跟随系统」，本应用不介入</string>
+    <string name="function_not_active">尚未生效</string>
+    <string name="function_await_first">等待首次识别 —— 转动一下手机</string>
+
+    <!-- ================================================ 实验功能（2026-10-03） -->
+    <!-- ⚠️ experimental_warning 是**用户给的原话**，逐字照抄，⛔ 不许顺手改措辞 -->
+    <string name="function_experimental_summary">仍在试验中的功能，默认不出现在旋转增强里</string>
+    <string name="experimental_title">实验功能</string>
+    <string name="experimental_warning">以下功能仍处于实验阶段，效果可能极度不稳定，请谨慎使用</string>
+    <string name="experimental_adaptive_title">自适应旋转</string>
+    <string name="experimental_adaptive_summary">打开后，到「旋转增强」的「模式」里选它</string>
+    <string name="experimental_adaptive_note">关掉它只是让这一项从「模式」里消失，不会改动你当前正在用的模式。</string>
+
+    <!-- ================================================ 标定提示（toast） -->
+    <string name="calib_ok">已校准</string>
+    <string name="calib_no_face">没采到人脸，请对准脸再试</string>
+    <string name="calib_bad_angle">两点角度差不对，请确认已把手机转了 90°</string>
+    <string name="calib_timeout">等待系统界面响应超时，请重试</string>
+    <string name="calib_unavailable">旋转服务当前不可用</string>
+    <string name="open_settings_failed">打不开系统设置：%1$s</string>
+
+    <!-- ================================================ 方向名（rotName） -->
+    <string name="rot_0">竖屏</string>
+    <string name="rot_1">横屏（摄像头朝左）</string>
+    <string name="rot_2">倒屏</string>
+    <string name="rot_3">横屏（摄像头朝右）</string>
+    <string name="rot_none">还没有结果</string>
+
+    <!-- ================================================ 通用零件 -->
+    <string name="common_back">返回</string>
+    <string name="kv_format">%1$s：%2$s</string>
+    <string name="outer_banner_title">当前屏幕不生效，请打开内屏</string>
+    <string name="form_inner">内屏</string>
+    <string name="form_outer">外屏</string>
+
+    <!-- ================================================ 模式名与说明 -->
+    <string name="mode_label_system">跟随系统</string>
+    <string name="mode_label_adaptive">自适应旋转（人脸）</string>
+    <string name="mode_label_semi">半自动旋转（点击确认）</string>
+    <string name="mode_short_system">跟随系统</string>
+    <string name="mode_short_adaptive">人脸</string>
+    <string name="mode_short_semi">半自动</string>
+    <string name="mode_summary_system">不干预：完全跟随系统的「自动旋转」设置</string>
+    <string name="mode_summary_adaptive">用前置摄像头识别你脸的方向，自动转屏</string>
+    <string name="mode_summary_semi">转动手机时右下角弹出按钮，点一下才转屏；不用摄像头，最省电</string>
+
+    <!-- ================================================ 采集策略 -->
+    <string name="strategy_label_power">省电优先</string>
+    <string name="strategy_label_responsive">响应优先</string>
+    <string name="strategy_summary_power">用完就关摄像头，每次识别会有一段启动等待</string>
+    <string name="strategy_summary_responsive">摄像头常驻，响应更快但更耗电</string>
+
+    <!-- ================================================ 识别 / 校验 -->
+    <string name="vote_none">本轮还没有识别结果</string>
+    <string name="vote_no_consensus">本轮识别 %1$s（没有一致结论）</string>
+    <string name="vote_winner">本轮识别 %1$s → 多数为「%2$s」（共 %3$d 次）</string>
+    <string name="vote_few">本轮识别 %1$s → 样本太少（共 %2$d 次），沿用上一次的判断</string>
+
+    <string name="sign_unknown">暂时无法校验（手机平放时没有参照，拿起来会自动恢复）</string>
+    <string name="sign_ok">✅ 已校验正确（与手机摆放方向比对 %1$d 次一致）</string>
+    <string name="sign_accum">正在积累校验样本（当前参照：%1$s）</string>
+    <string name="sign_flip">⚠️ 检测到方向可能相反（%1$d 次不符 / %2$d 次相符），样本足够后会自动纠正</string>
+    <string name="sign_checking">校验中：%1$d 次相符 / %2$d 次不符（相符占多时确认为正确）</string>
+
+    <!-- ================================================ 时长 -->
+    <string name="dur_sec">%1$d 秒</string>
+    <string name="dur_min_sec">%1$d 分 %2$d 秒</string>
+    <string name="dur_hr_min">%1$d 小时 %2$d 分</string>
+
+    <!-- ================================================ 半自动状态 -->
+    <string name="semi_no_overlay">半自动：旋转按钮无法显示 —— 去系统设置给本应用「显示在其他应用上层」权限</string>
+    <string name="semi_low_layer">半自动：按钮已出现 %1$d 次、点击生效 %2$d 次。⚠️ 按钮的显示层级较低，转到位后边角可能被状态栏挡住一块</string>
+    <string name="semi_idle">半自动：转动手机时，右下角会出现旋转按钮</string>
+    <string name="semi_counts">半自动：按钮已出现 %1$d 次、点击生效 %2$d 次</string>
+
+    <!-- ================================================ 结构化失败计数 -->
+    <string name="errs_none">无</string>
+    <string name="errs_bind">相机绑定 %1$s 次</string>
+    <string name="errs_rotw">方向写入 %1$s 次</string>
+    <string name="errs_rotr">方向读取 %1$s 次</string>
+    <string name="errs_fg">前台应用读取 %1$s 次</string>
+    <string name="errs_other">%1$s %2$s 次</string>
+    <string name="errs_join">、</string>
+
+    <!-- ================================================ 让位解释 -->
+    <string name="takeover_gated">「%1$s」%2$s → 本应用暂时不控制屏幕方向、交回系统处理（离开这个应用后会自动恢复）</string>
+    <string name="takeover_gated_current">当前应用</string>
+    <string name="takeover_no_grant">还没有生效：缺少「修改系统设置」权限 —— 到「旋转增强」页点一下授权</string>
+    <string name="takeover_unknown">还没有生效（暂时查不出原因，可到「诊断」页看详细状态）</string>
+
+    <string name="stop_whitelist">在你的豁免名单里</string>
+    <string name="stop_uncontrollable">实测在这个屏幕上旋转无效</string>
+    <string name="stop_other">不在本应用的控制范围内</string>
+
+    <!-- ================================================ 运行阶段 -->
+    <string name="phase_ready">运行中</string>
+    <string name="phase_starting">正在启动</string>
+    <string name="phase_stopped">已停止</string>
+    <string name="phase_failed">启动失败</string>
+
+    <!-- ================================================ 「当前状态」页读数 -->
+    <string name="ro_phase">运行状态：%1$s</string>
+    <string name="ro_mode">当前模式：%1$s</string>
+    <string name="ro_takeover">屏幕方向控制：%1$s</string>
+    <string name="ro_takeover_active">正在控制（按人脸识别的结果转屏）</string>
+    <string name="ro_rotation">当前方向：%1$s</string>
+    <string name="ro_sign">方向基准：%1$s</string>
+    <string name="ro_vote">本轮识别：%1$s</string>
+    <string name="ro_conflict">前置摄像头被占用：%1$d 次（识别过程中被其他应用抢走）</string>
+    <string name="ro_display">系统当前方向：%1$s</string>
+    <string name="ro_uptime">已运行：%1$s</string>
+    <string name="ro_heartbeat">服务响应：%1$d 秒前（%2$s）</string>
+    <string name="ro_normal">正常</string>
+    <string name="ro_unresponsive">无响应</string>
+
+    <!-- ================================================ 二级页：当前状态 -->
+    <string name="status_title">当前状态</string>
+    <string name="status_no_report">还没有收到状态回报。通常是模块没在 LSPosed 里启用 —— 那样只能保存设置，转不动屏幕。</string>
+    <string name="status_background">退到后台、锁屏、重启后依然生效。</string>
+    <string name="status_phase_suffix">（当前状态：%1$s）</string>
+    <string name="status_screen_rotation">当前屏幕：%1$s　方向：%2$s</string>
+
+    <!-- ================================================ 默认方向 -->
+    <string name="slot_title">默认方向</string>
+    <string name="slot_desc">展开后，内屏保持这个方向。</string>
+    <string name="slot_root_note">需要 root 权限，首次点选会弹出授权请求。</string>
+    <string name="slot_unsupported">这台设备的系统不支持方向设置。</string>
+    <string name="slot_failed">未能修改，请确认已授予 root 权限。</string>
+
+    <!-- ================================================ 二级页：旋转增强 -->
+    <string name="rotation_title">旋转增强</string>
+    <string name="rotation_mode_section">模式</string>
+    <string name="rotation_outer_reason">外屏完全交给系统处理，这一页的设置此刻都不生效；展开到内屏后按它们走。</string>
+    <string name="rotation_mode_title_active">模式（内屏 · 正在生效）</string>
+    <string name="rotation_mode_title">模式（内屏）</string>
+    <string name="rotation_mode_note">只对「内屏」生效；外屏完全交给系统处理。</string>
+    <string name="rotation_section_switches">开关</string>
+    <string name="rotation_gate_title">名单里的应用不干预（玩游戏时不抢资源）</string>
+    <string name="rotation_gate_on">名单里的应用不弹按钮、不改方向；游戏和长视频默认在里面，不跟手就把它移出去</string>
+    <string name="rotation_gate_off">已关闭：所有应用都正常工作（玩游戏时可能多占一点性能）</string>
+    <string name="rotation_handoff_title">让位时恢复系统的自动旋转</string>
+    <string name="rotation_handoff_on">让位时把方向交回系统，全屏看视频、看图仍能转屏</string>
+    <string name="rotation_handoff_off">让位时保持当前方向（自动旋转仍是关的）</string>
+    <string name="rotation_hint_title">按钮等待时长</string>
+    <string name="rotation_hint_summary">转完手机后有 %1$d 秒可以点它；超时自动消失（仅半自动模式）</string>
+    <string name="rotation_hint_value">%1$d 秒</string>
+    <string name="rotation_notice_title">使用提醒</string>
+    <string name="rotation_notice_body">「注视感知 / 智能扫码」会占着前置摄像头，方向就会偶尔跟不上 —— 建议关掉它：设置 → 锁屏 → 注视感知。\n\n别把本应用从最近任务里划掉：那样摄像头会被系统相机占住，自适应会失效。</string>
+    <string name="rotation_notice_button">打开系统设置</string>
+    <string name="rotation_preview_title">预览旋转按钮</string>
+    <string name="rotation_preview_body">按钮只在手机方向与屏幕方向不一致时出现。点它会立刻弹一次（位置和平时一样，屏幕右下角）；没反应就去「诊断」页看看。</string>
+    <string name="rotation_preview_button">弹一次按钮给我看看</string>
+    <string name="rotation_calib_title">方向校准</string>
+    <string name="rotation_calib_hint_start">屏幕转错方向时，按下面两步校准。</string>
+    <string name="rotation_calib_hint_step2">① 已完成，接着做 ②。</string>
+    <string name="rotation_calib_hint_done">已校准。方向再次异常时重做一次。</string>
+    <string name="rotation_calib_step1">① 手机竖屏正对自己，面部摆正，停留 2 秒</string>
+    <string name="rotation_calib_step1_btn">① 记竖屏</string>
+    <string name="rotation_calib_step1_btn_done">① 记竖屏 ✓</string>
+    <string name="rotation_calib_step2">② 手机横屏、摄像头朝左，面部仍正立，停留 2 秒</string>
+    <string name="rotation_calib_step2_btn">② 记横屏</string>
+    <string name="rotation_calib_step2_btn_done">② 记横屏 ✓</string>
+    <string name="rotation_calib_camera_note">校准需用摄像头，请先关闭相机与视频通话。</string>
+    <string name="rotation_calib_reset">恢复默认（需重新校准）</string>
+
+    <!-- ================================================ 实时角度 -->
+    <string name="live_zero_inner">0° = 内屏的默认方向（已换算）</string>
+    <string name="live_zero_outer">0° = 屏幕的默认方向（手机竖屏正对自己）</string>
+    <string name="live_starting">正在启动读数…（旋转服务最多 2 秒才会开始）</string>
+    <string name="live_stopped">读数已停止（%1$d 秒前）—— 离开本页再进来就会重开。若一直不行，可能是前置摄像头被别的应用占着。</string>
+    <string name="live_no_face">没有识别到人脸 —— 把手机举到面前、脸对着屏幕。</string>
+    <string name="live_kv_sector">识别到的方向</string>
+    <string name="live_kv_display">系统当前方向</string>
+    <string name="live_kv_form">当前屏幕</string>
+    <string name="live_kv_raw">原始读数</string>
+    <string name="live_raw_suffix">%1$s°（相对设备，未换算）</string>
+    <string name="live_footer">读数期间会占用前置摄像头；转屏照常工作。离开本页自动停止，最长 3 分钟。</string>
+    <string name="live_dial_0">竖</string>
+    <string name="live_dial_1">左横</string>
+    <string name="live_dial_2">倒</string>
+    <string name="live_dial_3">右横</string>
+
+    <!-- ================================================ 二级页：诊断 -->
+    <string name="diag_title">诊断</string>
+    <string name="diag_no_data">暂无数据 —— 旋转服务没有运行，或本次开机还没有上报。</string>
+    <string name="diag_kv_sensor">方向传感器</string>
+    <string name="diag_sensor_on">已启用（含陀螺仪兜底）</string>
+    <string name="diag_sensor_off">不可用 / 未知</string>
+    <string name="diag_kv_write">修改系统设置权限</string>
+    <string name="diag_granted">已具备</string>
+    <string name="diag_missing">缺失</string>
+    <string name="diag_kv_cfg">设置同步</string>
+    <string name="diag_cfg_not_ready_app">未就绪 · %1$s</string>
+    <string name="diag_cfg_not_ready_engine">未就绪 · 旋转服务读不到（%1$s）</string>
+    <string name="diag_cfg_unknown">未知（本次状态里没有这一项）</string>
+    <string name="diag_cfg_ok">已就绪（应用侧与服务侧都正常）</string>
+    <string name="diag_cfg_default_reason">本应用的系统模块没有启用</string>
+    <string name="diag_cfg_no_reason">原因未上报</string>
+    <string name="diag_kv_camera">前置摄像头编号</string>
+    <string name="diag_camera_none">—（未就绪）</string>
+    <string name="diag_camera_ok">%1$s（本机有多个可用，会自动切换）</string>
+    <string name="diag_kv_gate">应用名单控制</string>
+    <string name="diag_gate_unreadable">读不到当前应用 → 名单控制未生效（一切照常运行）</string>
+    <string name="diag_gate_gated_rotate">已让位：%1$s%2$s，已恢复系统自动旋转</string>
+    <string name="diag_gate_gated_hold">已让位：%1$s%2$s，保持当前方向</string>
+    <string name="diag_gate_normal">正常工作（%1$s 不在名单里） · 累计让位 %2$d 次</string>
+    <string name="diag_gate_current_app">当前应用</string>
+    <string name="diag_kv_fg_orientation">当前应用声明的方向</string>
+    <string name="diag_fg_orientation">%1$s（仅诊断用，不参与判断）</string>
+    <string name="diag_kv_whitelist">生效的应用名单</string>
+    <string name="diag_whitelist_value">%1$d 条（含未安装的默认项，所以比界面上看到的勾多）</string>
+    <string name="diag_kv_conflict">摄像头被占用</string>
+    <string name="diag_conflict_none">0 次（没被占用过）</string>
+    <string name="diag_conflict_some">%1$d 次（前置摄像头被其他应用占着，那几轮没有识别成功）</string>
+    <string name="diag_kv_uptime">已运行</string>
+    <string name="diag_kv_heartbeat">服务响应</string>
+    <string name="diag_heartbeat_ok">%1$d 秒前 · 正常</string>
+    <string name="diag_heartbeat_bad">%1$d 秒前 · 无响应（超过 %2$d 秒）</string>
+    <string name="diag_kv_errs">失败计数</string>
+    <string name="diag_metrics_no_data">暂无数据。可能是刚启动，或本次开机还没有触发过。</string>
+    <string name="diag_kv_burst">识别轮次</string>
+    <string name="diag_kv_switch">方向切换</string>
+    <string name="diag_switch_value">%1$d 次</string>
+    <string name="diag_kv_frames">累计处理 / 识别到人脸</string>
+    <string name="diag_kv_vote">本轮识别</string>
+    <string name="diag_kv_open_ms">摄像头启动耗时</string>
+    <string name="diag_open_ms_value">%1$d 毫秒（启动到第一帧）</string>
+    <string name="diag_kv_sign">方向基准校验</string>
+    <string name="diag_kv_display">系统当前方向</string>
+    <string name="diag_kv_calib">校准</string>
+    <string name="diag_calib_done_confirmed">角度偏移 %1$s°（方向基准已校验）</string>
+    <string name="diag_calib_done_unconfirmed">角度偏移 %1$s°（方向基准尚未校验）</string>
+    <string name="diag_calib_none">还没有校准</string>
+    <string name="diag_section_trigger">触发与让位</string>
+    <string name="diag_section_metrics">识别指标</string>
+    <string name="diag_section_log">数据记录</string>
+    <string name="diag_log_note">运行记录由系统侧保存，本应用无权读取或关闭，所以这里没有开关。</string>
+    <string name="diag_section_events">最近事件</string>
+    <string name="diag_events_none">暂无</string>
+
+    <!-- ================================================ 应用名单 -->
+    <string name="wl_section_note">名单说明</string>
+    <string name="wl_gate_off">⚠️ 上面的总开关是关着的 —— 这份名单此刻不生效，改动不会有反应。</string>
+    <string name="wl_explain">开启后，该应用的方向交给系统，本应用不再干涉。</string>
+    <string name="wl_on_title">已开启（%1$d）</string>
+    <string name="wl_empty">名单是空的 —— 所有应用都归本应用管；想放行谁，在下面列表里打开它。</string>
+    <string name="wl_tag_legend">「默认清单」= 出厂自带；「手动指定」= 你自己开的。</string>
+    <string name="wl_section_search">搜索</string>
+    <string name="wl_search_label">应用名或包名</string>
+    <string name="wl_count">已装 %1$d 个应用 · 名单内 %2$d</string>
+    <string name="wl_count_uc"> · 实测转不动 %1$d</string>
+    <string name="wl_count_match"> · 匹配 %1$d 个</string>
+    <string name="wl_reset">恢复默认（把关掉的默认项打开）</string>
+    <string name="wl_clear">清除实测记录（%1$d 条）</string>
+    <string name="wl_clear_note">清除后会重新开始检测，约需一两秒。</string>
+    <string name="wl_section_installed">已安装应用（A-Z）</string>
+    <string name="wl_loading">正在读取应用列表…</string>
+    <string name="wl_no_match">没有匹配「%1$s」的应用。</string>
+    <string name="wl_tag_default"> · 默认清单</string>
+    <string name="wl_tag_manual"> · 手动指定</string>
+    <string name="wl_tag_uc"> · 实测转不动</string>
+    <string name="wl_own_note">本应用默认不在名单里，设置页也归它管（会看到旋转按钮）。想让设置页跟随系统旋转，就打开这一格。</string>
+    <string name="uc_note">实测转不动：本应用试过在%1$s上旋转，但屏幕没变化，所以不再控制它。</string>
+
+    <!-- ================================================ 捐赠卡 -->
+    <string name="donate_title">支持 HyperPlus</string>
+    <string name="donate_qr_desc">微信捐赠二维码</string>
+    <string name="donate_pitch">作者开发不易，求求赏口饭吃。</string>
+    <string name="donate_saved">已保存到相册（图片 / HyperPlus）</string>
+    <string name="donate_save_failed">保存失败，请稍后重试</string>
+    <string name="donate_saving">正在保存…</string>
+    <string name="donate_save_button">保存二维码到相册</string>
+    <string name="donate_terms">关于收费：Alpha 阶段将始终保持免费；不排除将来推出 Beta 或正式版后，部分功能收费的可能。</string>
+
+    <!-- ================================================ 更新弹窗 -->
+    <string name="update_title">发现新版本</string>
+    <string name="update_subtitle">%1$s\u3000（当前 %2$s）</string>
+    <string name="update_no_notes">作者没有填写更新说明，点「去下载」查看详情。</string>
+    <string name="update_later">稍后</string>
+    <string name="update_download">去下载</string>
+    <!-- 手动「检查更新」的反馈（Toast）。⚠️ update_fail_http / update_fail_exception 带的是不可翻译的补充（HTTP 码 / 异常名） -->
+    <string name="update_up_to_date">已是最新版本 %1$s</string>
+    <string name="update_check_failed">检查失败：%1$s</string>
+    <string name="update_fail_no_release">仓库还没有已发布的 Release</string>
+    <string name="update_fail_http">HTTP %1$s</string>
+    <string name="update_fail_no_tag">返回里没有 tag_name</string>
+    <string name="update_fail_exception">%1$s</string>
+</resources>

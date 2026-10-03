@@ -2,8 +2,13 @@
 # 在 Linux / macOS 上直接跑不起来。
 * text=auto eol=lf
 
+# ⚠️ .bat 要反过来：Windows 的 cmd 读 LF-only 的批处理在部分场景（多行块、标签跳转）
+#   会出错，所以显式要求 CRLF 入库。
+*.bat text eol=crlf
+
 *.png binary
 *.jpg binary
 *.jar binary
 *.aar binary
 *.keystore binary
+*.jks binary

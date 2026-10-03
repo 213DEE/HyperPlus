@@ -1,5 +1,369 @@
 <?xml version="1.0" encoding="utf-8"?>
+<!--
+  ★ 默认资源 = **英文**（2026-10-03 起）。
+    理由：用户原话「如果系统文字不是以上三种，默认英文」——
+    本工程只准备了三套资源（英文 / 简体 / 繁体），凡是没被
+    `values-zh-rCN` / `values-zh-rTW` 覆盖到的系统语言，都会落回这里，
+    ⇒ 这里**必须是英文**，否则日语 / 德语用户会看到中文。
+
+  ⛔ 别把中文搬回来当默认值（`tile_label` 原来就是中文，已挪去 `values-zh-rCN`）。
+
+  ★ 命名：`<页面或模块>_<语义>`。同一个词在不同语境下**允许**多条
+    （例如 `app_name` 与底栏无关，别为了省条目去复用）。
+-->
 <resources>
     <string name="app_name">HyperPlus</string>
-    <string name="tile_label">自适应旋转</string>
+    <string name="tile_label">Adaptive rotation</string>
+
+    <!-- ================================================ 语言选择器 -->
+    <!--
+      ★ 三种语言名**刻意不翻译**（`translatable="false"`）：语言选择器里
+        用户是在认自己母语的名字，翻成 "Simplified Chinese" 反而多一层跨越。
+        见 `AppLocale.labelRes` 的注释。
+      ★ 「跟随系统」**不是**语言名而是一个选项 ⇒ 它跟着界面语言翻译，别加 translatable="false"。
+    -->
+    <string name="lang_name_zh_hans" translatable="false">简体中文</string>
+    <string name="lang_name_zh_hant" translatable="false">繁體中文</string>
+    <string name="lang_name_en" translatable="false">English</string>
+    <string name="lang_name_auto">Follow system</string>
+
+    <string name="lang_page_title">Language</string>
+    <string name="lang_page_summary">Interface language</string>
+    <string name="lang_page_desc">Choose the language used in this app.</string>
+    <string name="lang_page_hint">Changing it takes effect immediately.</string>
+
+    <!-- ================================================ 底栏 -->
+    <string name="tab_function">Features</string>
+    <string name="tab_settings">Settings</string>
+
+    <!-- ================================================ 主页：设置 -->
+    <string name="settings_title">Settings</string>
+    <string name="settings_channel_broken">⚠️ Settings won\'t take effect yet</string>
+    <string name="settings_channel_default">This app\'s system module isn\'t enabled.</string>
+    <string name="settings_channel_fix">Until it\'s fixed nothing here works — in LSPosed, enable HyperPlus itself too (not just “System UI”).</string>
+    <!-- Why the config channel self-check failed (2026-10-03: moved out of AppPrefs so it can be localized) -->
+    <string name="channel_ready">Ready: settings live in the shared folder and the rotation service can read them</string>
+    <string name="channel_not_ready">Not ready: settings only go to this app\'s private folder, so the rotation service can\'t read them. In LSPosed, enable HyperPlus itself too, then restart this app.</string>
+    <string name="settings_section_monitor">Monitoring &amp; troubleshooting</string>
+    <string name="settings_status_title">Current status</string>
+    <string name="settings_status_summary">Runtime · Rotation control · Current orientation · Semi-auto button</string>
+    <string name="settings_diag_title">Diagnostics</string>
+    <string name="settings_diag_summary">Trigger &amp; handoff · Detection metrics · Data log · Recent events</string>
+    <string name="settings_section_app">App</string>
+    <string name="settings_about_title">About</string>
+    <string name="settings_about_summary">Version · Check for updates · How it runs · Disclaimer</string>
+    <string name="settings_language_title">Language</string>
+    <string name="settings_language_summary">Follow system · 简体中文 · 繁體中文 · English</string>
+
+    <!-- ================================================ 二级页：关于 -->
+    <string name="about_title">About</string>
+    <string name="about_version">Version</string>
+    <string name="about_checking"> (checking…)</string>
+    <string name="about_run_mode">How it runs</string>
+    <string name="about_run_mode_value">Runs in the background; you don\'t need to keep this app open</string>
+    <string name="about_check_update">Check for updates</string>
+    <string name="about_disclaimer_title">Disclaimer</string>
+    <string name="about_disclaimer_body">This app adjusts screen orientation through LSPosed, which counts as an unofficial modification: it doesn\'t modify system files, and the core features don\'t need root — but please understand the risks before using it. If something goes wrong, just disable the module in LSPosed to restore everything.</string>
+
+    <!-- ================================================ 主页：功能 -->
+    <string name="function_title">Features</string>
+    <string name="function_section_rotation">Rotation</string>
+    <string name="function_section_experimental">Experimental</string>
+    <string name="function_rotation_title">Rotation enhancements</string>
+    <string name="function_rotation_summary">Inner screen: %1$s; the outer screen is handled by the system (Mode / Floating button / Orientation calibration / App list)</string>    <string name="function_state_probing">Reading status…</string>
+    <string name="function_state_noservice">Can\'t reach the rotation service</string>
+    <string name="function_state_offline">Rotation service is offline</string>
+    <string name="function_state_running">Running</string>
+    <string name="function_state_probing_long">Reading rotation service status…</string>
+    <string name="function_no_report">No status report received yet. The most common cause is the module not being enabled in LSPosed (in that case settings are saved, but the screen won\'t rotate).</string>
+    <string name="function_lost">Last response was %1$d seconds ago (over %2$d s counts as offline); it recovers automatically after System UI restarts — just wait a moment.</string>
+    <string name="function_mode_system">Current mode is “Follow system”; this app won\'t interfere</string>
+    <string name="function_not_active">Not active yet</string>
+    <string name="function_await_first">Waiting for first detection — rotate your phone</string>
+
+    <!-- ================================================ 实验功能（2026-10-03） -->
+    <!-- ⚠️ experimental_warning 是**用户给的原话**（中文那两套逐字照抄），别"优化"措辞 -->
+    <string name="function_experimental_summary">Still being tested; hidden from Rotation enhancements by default</string>
+    <string name="experimental_title">Experimental features</string>
+    <string name="experimental_warning">The features below are still experimental and may be extremely unstable. Use them with caution.</string>
+    <string name="experimental_adaptive_title">Adaptive rotation</string>
+    <string name="experimental_adaptive_summary">Once on, select it in Rotation enhancements, under Mode</string>
+    <string name="experimental_adaptive_note">Turning it off only hides the option from Mode; it won\'t change the mode you are currently using.</string>
+
+    <!-- ================================================ 标定提示（toast） -->
+    <string name="calib_ok">Calibrated</string>
+    <string name="calib_no_face">No face detected — face the camera and try again</string>
+    <string name="calib_bad_angle">The two angles aren\'t different enough — make sure you turned the phone 90°</string>
+    <string name="calib_timeout">Timed out waiting for System UI — please retry</string>
+    <string name="calib_unavailable">The rotation service is currently unavailable</string>
+    <string name="open_settings_failed">Can\'t open system settings: %1$s</string>
+
+    <!-- ================================================ 方向名（rotName） -->
+    <string name="rot_0">Portrait</string>
+    <string name="rot_1">Landscape (camera on the left)</string>
+    <string name="rot_2">Upside down</string>
+    <string name="rot_3">Landscape (camera on the right)</string>
+    <string name="rot_none">No result yet</string>
+
+    <!-- ================================================ 通用零件 -->
+    <string name="common_back">Back</string>
+    <!-- 读数行 `键：值`。⚠️ 冒号要跟着语言走：中文全角「：」、英文半角加空格 -->
+    <string name="kv_format">%1$s: %2$s</string>
+    <string name="outer_banner_title">Settings here don\'t apply to this screen — open the inner screen</string>
+    <string name="form_inner">Inner screen</string>
+    <string name="form_outer">Outer screen</string>
+
+    <!-- ================================================ 模式名与说明 -->
+    <string name="mode_label_system">Follow system</string>
+    <string name="mode_label_adaptive">Adaptive rotation (face)</string>
+    <string name="mode_label_semi">Semi-auto rotation (tap to confirm)</string>
+    <!-- 短名：给放不下长文案的地方（控制中心磁贴的副标题） -->
+    <string name="mode_short_system">Follow system</string>
+    <string name="mode_short_adaptive">Face</string>
+    <string name="mode_short_semi">Semi-auto</string>
+    <string name="mode_summary_system">No interference: fully follows the system\'s “Auto-rotate” setting</string>
+    <string name="mode_summary_adaptive">Uses the front camera to read which way your face is, then rotates the screen</string>
+    <string name="mode_summary_semi">A button pops up in the bottom-right when you turn the phone; tap it to rotate. No camera, lowest battery use</string>
+
+    <!-- ================================================ 采集策略 -->
+    <string name="strategy_label_power">Battery saver first</string>
+    <string name="strategy_label_responsive">Responsiveness first</string>
+    <string name="strategy_summary_power">Turns the camera off when done; each detection has a short start-up wait</string>
+    <string name="strategy_summary_responsive">Camera stays on; responds faster but uses more battery</string>
+
+    <!-- ================================================ 识别 / 校验 -->
+    <string name="vote_none">No detection result this round</string>
+    <string name="vote_no_consensus">This round: %1$s (no agreement)</string>
+    <string name="vote_winner">This round: %1$s → mostly “%2$s” (%3$d samples)</string>
+    <string name="vote_few">This round: %1$s → too few samples (%2$d in total), keeping the previous result</string>
+
+    <string name="sign_unknown">Can\'t verify right now (no reference while the phone lies flat; it recovers once you pick it up)</string>
+    <string name="sign_ok">✅ Verified (matched the phone\'s position %1$d times)</string>
+    <string name="sign_accum">Collecting samples (current reference: %1$s)</string>
+    <string name="sign_flip">⚠️ Orientation may be inverted (%1$d mismatches / %2$d matches) — it will self-correct once there are enough samples</string>
+    <string name="sign_checking">Checking: %1$d matches / %2$d mismatches (confirmed once matches are in the majority)</string>
+
+    <!-- ================================================ 时长 -->
+    <string name="dur_sec">%1$d s</string>
+    <string name="dur_min_sec">%1$d min %2$d s</string>
+    <string name="dur_hr_min">%1$d h %2$d min</string>
+
+    <!-- ================================================ 半自动状态 -->
+    <string name="semi_no_overlay">Semi-auto: the rotate button can\'t be shown — grant this app “Display over other apps” in system settings</string>
+    <string name="semi_low_layer">Semi-auto: button shown %1$d times, taps took effect %2$d times. ⚠️ The button\'s layer is low, so once rotated a corner may be covered by the status bar</string>
+    <string name="semi_idle">Semi-auto: a rotate button appears in the bottom-right when you turn the phone</string>
+    <string name="semi_counts">Semi-auto: button shown %1$d times, taps took effect %2$d times</string>
+
+    <!-- ================================================ 结构化失败计数 -->
+    <string name="errs_none">none</string>
+    <string name="errs_bind">camera bind ×%1$s</string>
+    <string name="errs_rotw">orientation write ×%1$s</string>
+    <string name="errs_rotr">orientation read ×%1$s</string>
+    <string name="errs_fg">foreground app read ×%1$s</string>
+    <string name="errs_other">%1$s ×%2$s</string>
+    <string name="errs_join">, </string>
+
+    <!-- ================================================ 让位解释 -->
+    <string name="takeover_gated">“%1$s” %2$s → this app isn\'t controlling the screen orientation for now and hands it back to the system (it recovers after you leave that app)</string>
+    <string name="takeover_gated_current">The current app</string>
+    <string name="takeover_no_grant">Not active yet: missing “Modify system settings” permission — tap grant on the “Rotation enhancements” page</string>
+    <string name="takeover_unknown">Not active yet (can\'t tell why right now; check the “Diagnostics” page for details)</string>
+
+    <string name="stop_whitelist">is on your exempt list</string>
+    <string name="stop_uncontrollable">is measured to not rotate on this screen</string>
+    <string name="stop_other">is outside this app\'s control</string>
+
+    <!-- ================================================ 运行阶段 -->
+    <string name="phase_ready">Running</string>
+    <string name="phase_starting">Starting</string>
+    <string name="phase_stopped">Stopped</string>
+    <string name="phase_failed">Failed to start</string>
+
+    <!-- ================================================ 「当前状态」页读数 -->
+    <string name="ro_phase">Runtime: %1$s</string>
+    <string name="ro_mode">Current mode: %1$s</string>
+    <string name="ro_takeover">Orientation control: %1$s</string>
+    <string name="ro_takeover_active">Controlling (rotating the screen by face detection)</string>
+    <string name="ro_rotation">Current orientation: %1$s</string>
+    <string name="ro_sign">Orientation reference: %1$s</string>
+    <string name="ro_vote">This round: %1$s</string>
+    <string name="ro_conflict">Front camera taken over: %1$d times (grabbed by another app during detection)</string>
+    <string name="ro_display">System orientation: %1$s</string>
+    <string name="ro_uptime">Uptime: %1$s</string>
+    <string name="ro_heartbeat">Service response: %1$d s ago (%2$s)</string>
+    <string name="ro_normal">normal</string>
+    <string name="ro_unresponsive">no response</string>
+
+    <!-- ================================================ 二级页：当前状态 -->
+    <string name="status_title">Current status</string>
+    <string name="status_no_report">No status report received yet. Usually the module isn\'t enabled in LSPosed — in that case settings are saved, but the screen won\'t rotate.</string>
+    <string name="status_background">Still active after you background the app, lock the screen, or restart.</string>
+    <string name="status_phase_suffix"> (now: %1$s)</string>
+    <string name="status_screen_rotation">Screen: %1$s · Orientation: %2$s</string>
+
+    <!-- ================================================ 默认方向 -->
+    <string name="slot_title">Default orientation</string>
+    <string name="slot_desc">After unfolding, the inner screen keeps this orientation.</string>
+    <string name="slot_root_note">Needs root; the first tap will show a permission prompt.</string>
+    <string name="slot_unsupported">This device\'s system doesn\'t support orientation settings.</string>
+    <string name="slot_failed">Couldn\'t change it — make sure root access was granted.</string>
+
+    <!-- ================================================ 二级页：旋转增强 -->
+    <string name="rotation_title">Rotation enhancements</string>
+    <string name="rotation_mode_section">Mode</string>
+    <string name="rotation_outer_reason">The outer screen is fully handled by the system, so nothing on this page applies right now; unfold to the inner screen and these settings take over.</string>
+    <string name="rotation_mode_title_active">Mode (inner screen · active)</string>
+    <string name="rotation_mode_title">Mode (inner screen)</string>
+    <string name="rotation_mode_note">Applies to the inner screen only; the outer screen is fully handled by the system.</string>
+    <string name="rotation_section_switches">Switches</string>
+    <string name="rotation_gate_title">Don\'t interfere with apps on the list (no resource contention while gaming)</string>
+    <string name="rotation_gate_on">Apps on the list get no rotate button and no orientation changes; games and long videos are on it by default — remove an app if it doesn\'t feel responsive</string>
+    <string name="rotation_gate_off">Off: every app works normally (may use a bit more power while gaming)</string>
+    <string name="rotation_handoff_title">Restore system auto-rotate when handing off</string>
+    <string name="rotation_handoff_on">Hand the orientation back to the system, so full-screen video and photos can still rotate</string>
+    <string name="rotation_handoff_off">Keep the current orientation (auto-rotate stays off)</string>
+    <string name="rotation_hint_title">Button wait time</string>
+    <string name="rotation_hint_summary">After you turn the phone you have %1$d seconds to tap it; it disappears on timeout (semi-auto only)</string>
+    <string name="rotation_hint_value">%1$d s</string>
+    <string name="rotation_notice_title">Usage note</string>
+    <string name="rotation_notice_body">“Attention detection / Smart scanning” holds the front camera, so the orientation occasionally lags — consider turning it off: Settings → Lock screen → Attention detection.\n\nDon\'t swipe this app away from Recents: that lets the system camera take the front camera and adaptive mode stops working.</string>
+    <string name="rotation_notice_button">Open system settings</string>
+    <string name="rotation_preview_title">Preview the rotate button</string>
+    <string name="rotation_preview_body">The button only appears when the phone\'s orientation differs from the screen\'s. Tapping here makes it pop up once right away (same place as usual, bottom-right); if nothing happens, check the Diagnostics page.</string>
+    <string name="rotation_preview_button">Show me the button once</string>
+    <string name="rotation_calib_title">Orientation calibration</string>
+    <string name="rotation_calib_hint_start">If the screen rotates the wrong way, calibrate with the two steps below.</string>
+    <string name="rotation_calib_hint_step2">① is done — now do ②.</string>
+    <string name="rotation_calib_hint_done">Calibrated. Redo it if the orientation goes wrong again.</string>
+    <string name="rotation_calib_step1">① Hold the phone upright facing you, head straight, for 2 seconds</string>
+    <string name="rotation_calib_step1_btn">① Record portrait</string>
+    <string name="rotation_calib_step1_btn_done">① Portrait ✓</string>
+    <string name="rotation_calib_step2">② Turn the phone to landscape with the camera on the left, head still upright, for 2 seconds</string>
+    <string name="rotation_calib_step2_btn">② Record landscape</string>
+    <string name="rotation_calib_step2_btn_done">② Landscape ✓</string>
+    <string name="rotation_calib_camera_note">Calibration uses the camera — close any camera or video-call app first.</string>
+    <string name="rotation_calib_reset">Reset to default (recalibration needed)</string>
+
+    <!-- ================================================ 实时角度 -->
+    <string name="live_zero_inner">0° = the inner screen\'s default orientation (converted)</string>
+    <string name="live_zero_outer">0° = the screen\'s default orientation (phone upright facing you)</string>
+    <string name="live_starting">Starting readings… (the rotation service can take up to 2 s to begin)</string>
+    <string name="live_stopped">Readings stopped (%1$d s ago) — leave this page and come back to restart. If it keeps failing, another app may be holding the front camera.</string>
+    <string name="live_no_face">No face detected — hold the phone in front of you with your face toward the screen.</string>
+    <string name="live_kv_sector">Detected orientation</string>
+    <string name="live_kv_display">System orientation</string>
+    <string name="live_kv_form">Current screen</string>
+    <string name="live_kv_raw">Raw reading</string>
+    <string name="live_raw_suffix">%1$s° (device-relative, not converted)</string>
+    <string name="live_footer">Readings use the front camera; rotation keeps working as usual. It stops automatically when you leave this page, after at most 3 minutes.</string>
+    <string name="live_dial_0">Up</string>
+    <string name="live_dial_1">Left</string>
+    <string name="live_dial_2">Down</string>
+    <string name="live_dial_3">Right</string>
+
+    <!-- ================================================ 二级页：诊断 -->
+    <string name="diag_title">Diagnostics</string>
+    <string name="diag_no_data">No data yet — the rotation service isn\'t running, or it hasn\'t reported since this boot.</string>
+    <string name="diag_kv_sensor">Orientation sensor</string>
+    <string name="diag_sensor_on">Enabled (with gyroscope fallback)</string>
+    <string name="diag_sensor_off">Unavailable / unknown</string>
+    <string name="diag_kv_write">Modify system settings permission</string>
+    <string name="diag_granted">Granted</string>
+    <string name="diag_missing">Missing</string>
+    <string name="diag_kv_cfg">Settings sync</string>
+    <string name="diag_cfg_not_ready_app">Not ready · %1$s</string>
+    <string name="diag_cfg_not_ready_engine">Not ready · the rotation service can\'t read it (%1$s)</string>
+    <string name="diag_cfg_unknown">Unknown (not present in this state report)</string>
+    <string name="diag_cfg_ok">Ready (both the app side and the service side are fine)</string>
+    <string name="diag_cfg_default_reason">this app\'s system module isn\'t enabled</string>
+    <string name="diag_cfg_no_reason">no reason reported</string>
+    <string name="diag_kv_camera">Front camera id</string>
+    <string name="diag_camera_none">— (not ready)</string>
+    <string name="diag_camera_ok">%1$s (several are available on this device; it switches automatically)</string>
+    <string name="diag_kv_gate">App list control</string>
+    <string name="diag_gate_unreadable">Can\'t read the current app → list control is inactive (everything runs as usual)</string>
+    <string name="diag_gate_gated_rotate">Handed off: %1$s%2$s, system auto-rotate restored</string>
+    <string name="diag_gate_gated_hold">Handed off: %1$s%2$s, keeping the current orientation</string>
+    <string name="diag_gate_normal">Working normally (%1$s isn\'t on the list) · %2$d hand-offs so far</string>
+    <string name="diag_gate_current_app">the current app</string>
+    <string name="diag_kv_fg_orientation">Declared orientation of current app</string>
+    <string name="diag_fg_orientation">%1$s (diagnostics only, not used in decisions)</string>
+    <string name="diag_kv_whitelist">Effective app list</string>
+    <string name="diag_whitelist_value">%1$d entries (includes not-installed defaults, so more than the toggles you see)</string>
+    <string name="diag_kv_conflict">Camera taken over</string>
+    <string name="diag_conflict_none">0 times (never taken over)</string>
+    <string name="diag_conflict_some">%1$d times (the front camera was held by another app, so those rounds detected nothing)</string>
+    <string name="diag_kv_uptime">Uptime</string>
+    <string name="diag_kv_heartbeat">Service response</string>
+    <string name="diag_heartbeat_ok">%1$d s ago · normal</string>
+    <string name="diag_heartbeat_bad">%1$d s ago · no response (over %2$d s)</string>
+    <string name="diag_kv_errs">Failure counts</string>
+    <string name="diag_metrics_no_data">No data yet. It may have just started, or nothing has triggered it since this boot.</string>
+    <string name="diag_kv_burst">Detection rounds</string>
+    <string name="diag_kv_switch">Orientation switches</string>
+    <string name="diag_switch_value">%1$d times</string>
+    <string name="diag_kv_frames">Frames / faces detected</string>
+    <string name="diag_kv_vote">This round</string>
+    <string name="diag_kv_open_ms">Camera start-up time</string>
+    <string name="diag_open_ms_value">%1$d ms (start to first frame)</string>
+    <string name="diag_kv_sign">Orientation reference</string>
+    <string name="diag_kv_display">System orientation</string>
+    <string name="diag_kv_calib">Calibration</string>
+    <string name="diag_calib_done_confirmed">angle offset %1$s° (orientation reference verified)</string>
+    <string name="diag_calib_done_unconfirmed">angle offset %1$s° (orientation reference not verified yet)</string>
+    <string name="diag_calib_none">Not calibrated yet</string>
+    <string name="diag_section_trigger">Triggering &amp; hand-off</string>
+    <string name="diag_section_metrics">Detection metrics</string>
+    <string name="diag_section_log">Data log</string>
+    <string name="diag_log_note">Runtime logs are kept by the system side; this app can neither read nor disable them, so there\'s no switch here.</string>
+    <string name="diag_section_events">Recent events</string>
+    <string name="diag_events_none">None</string>
+
+    <!-- ================================================ 应用名单 -->
+    <string name="wl_section_note">About the list</string>
+    <string name="wl_gate_off">⚠️ The switch above is off — this list has no effect right now, so changes won\'t do anything.</string>
+    <string name="wl_explain">Once enabled, that app\'s orientation is handed to the system and this app stops interfering.</string>
+    <string name="wl_on_title">Enabled (%1$d)</string>
+    <string name="wl_empty">The list is empty — this app manages every app; to let one through, turn it on in the list below.</string>
+    <string name="wl_tag_legend">“Default list” = shipped with the app; “Manually added” = turned on by you.</string>
+    <string name="wl_section_search">Search</string>
+    <string name="wl_search_label">App name or package</string>
+    <string name="wl_count">%1$d apps installed · %2$d on the list</string>
+    <string name="wl_count_uc"> · %1$d won\'t rotate (measured)</string>
+    <string name="wl_count_match"> · %1$d matching</string>
+    <string name="wl_reset">Reset to default (re-enable removed defaults)</string>
+    <string name="wl_clear">Clear measured records (%1$d)</string>
+    <string name="wl_clear_note">Detection restarts after clearing; it takes a second or two.</string>
+    <string name="wl_section_installed">Installed apps (A-Z)</string>
+    <string name="wl_loading">Reading the app list…</string>
+    <string name="wl_no_match">No app matches “%1$s”.</string>
+    <string name="wl_tag_default"> · Default list</string>
+    <string name="wl_tag_manual"> · Manually added</string>
+    <string name="wl_tag_uc"> · Won\'t rotate (measured)</string>
+    <string name="wl_own_note">This app isn\'t on the list by default, so its own settings page is managed too (you\'ll see the rotate button). Turn this on to let the settings page follow the system.</string>
+    <string name="uc_note">Measured as unrotatable: this app tried to rotate on the %1$s but the screen didn\'t change, so it no longer controls it.</string>
+
+    <!-- ================================================ 捐赠卡 -->
+    <string name="donate_title">Support HyperPlus</string>
+    <string name="donate_qr_desc">WeChat donation QR code</string>
+    <string name="donate_pitch">Making this app is hard work — please buy me a meal.</string>
+    <string name="donate_saved">Saved to gallery (Pictures / HyperPlus)</string>
+    <string name="donate_save_failed">Save failed, please try again later</string>
+    <string name="donate_saving">Saving…</string>
+    <string name="donate_save_button">Save QR code to gallery</string>
+    <string name="donate_terms">On pricing: it will stay free throughout the Alpha stage; charging for some features after a Beta or stable release isn\'t ruled out.</string>
+
+    <!-- ================================================ 更新弹窗 -->
+    <string name="update_title">New version available</string>
+    <string name="update_subtitle">%1$s\u3000(current %2$s)</string>
+    <string name="update_no_notes">The author didn\'t write release notes — tap “Download” for details.</string>
+    <string name="update_later">Later</string>
+    <string name="update_download">Download</string>
+    <!-- Manual “check for updates” feedback (toasts). ⚠️ update_fail_http / update_fail_exception take a non-translatable detail (HTTP code / exception name). -->
+    <string name="update_up_to_date">Already up to date: %1$s</string>
+    <string name="update_check_failed">Update check failed: %1$s</string>
+    <string name="update_fail_no_release">this repo has no published release yet</string>
+    <string name="update_fail_http">HTTP %1$s</string>
+    <string name="update_fail_no_tag">the response has no tag_name</string>
+    <string name="update_fail_exception">%1$s</string>
 </resources>

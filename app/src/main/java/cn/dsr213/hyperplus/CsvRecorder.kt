@@ -73,9 +73,13 @@ class CsvRecorder(private val ctx: Context) {
 
     companion object {
         /** ⚠️ 必须与 AdaptiveEngine.csvRow() 的列顺序逐列一致，否则事后分析会错位。
-         *  也与 2026-09-25 那批历史实测 CSV 保持一致，分析脚本可直接复用。 */
+         *  也与 2026-09-25 那批历史实测 CSV 保持一致，分析脚本可直接复用。
+         *
+         *  `raw_tilt`（2026-09-25 追加在**末尾**，不影响前 18 列的既有分析脚本）：
+         *  采纳角度时脸"看起来"歪了多少度。> 45 说明这一帧是勉强认出来的，
+         *  用来验证「摆得最正才采纳」这条规则是否真的把角度还原稳住了。 */
         val HEADER = "at_ms,euler_z,eye_roll,face_count,face_area,detect_ms," +
                 "rot_deg,sys_rot,extra_rot,tried,interval_ms," +
-                "smoothed,norm,decided,state,deviation,low_conf,err"
+                "smoothed,norm,decided,state,deviation,low_conf,err,raw_tilt"
     }
 }

@@ -1,6 +1,7 @@
 package cn.dsr213.hyperplus
 
 import android.util.Log
+import androidx.annotation.StringRes
 import org.json.JSONObject
 import java.net.HttpURLConnection
 import java.net.URL
@@ -44,8 +45,22 @@ object VersionChecker {
         /** 已是最新 */
         data class UpToDate(val current: String) : Result
 
-        /** 查询失败（网络/限流/无 Release）—— UI 应静默 */
-        data class Failed(val reason: String) : Result
+        /**
+         * 查询失败（网络 / 限流 / 仓库还没有 Release）。
+         *
+         * ⚠️ 2026-10-03 多语言：原来是 `Failed(val reason: String)`，直接存**中文句子**。
+         *   而它会经 `HyperPlusApp` 的 toast **显示在界面上**（用户手动点「检查更新」时）
+         *   ⇒ 界面语言是英文时照样弹中文。
+         *   ⇒ 拆成两半：**界面口径的资源 id**（[reasonRes]）＋**不可翻译的补充**
+         *   （[detail]：HTTP 状态码 / 异常类名 —— 那些本来就不该翻）。
+         *
+         * ⚠️ 这个类**拿不到 Context**（`check()` 是纯函数、跑在 IO 线程），
+         *   所以只能交回 id，"查表"交给界面那一刻做 —— 顺带也免疫"切语言后文案过期"。
+         */
+        data class Failed(
+            @StringRes val reasonRes: Int,
+            val detail: String = "",
+        ) : Result
     }
 
     /** 在**后台线程**调用；内部是阻塞 IO */
@@ -62,11 +77,11 @@ object VersionChecker {
             val code = conn.responseCode
             if (code == 404) {
                 conn.disconnect()
-                return Result.Failed("仓库还没有已发布的 Release")
+                return Result.Failed(R.string.update_fail_no_release)
             }
             if (code != 200) {
                 conn.disconnect()
-                return Result.Failed("HTTP $code")
+                return Result.Failed(R.string.update_fail_http, code.toString())
             }
             val text = conn.inputStream.bufferedReader().use { it.readText() }
             conn.disconnect()
@@ -79,7 +94,7 @@ object VersionChecker {
                 htmlUrl = o.optString("html_url", ""),
                 publishedAt = o.optString("published_at", ""),
             )
-            if (remote.tag.isBlank()) return Result.Failed("返回里没有 tag_name")
+            if (remote.tag.isBlank()) return Result.Failed(R.string.update_fail_no_tag)
 
             if (compare(parse(remote.tag), parse(currentVersion)) > 0) {
                 Result.Newer(remote, currentVersion)
@@ -88,7 +103,10 @@ object VersionChecker {
             }
         } catch (e: Exception) {
             Log.w(TAG, "version check failed: ${e.message}")
-            Result.Failed(e.javaClass.simpleName + ": " + (e.message ?: ""))
+            Result.Failed(
+                R.string.update_fail_exception,
+                e.javaClass.simpleName + ": " + (e.message ?: ""),
+            )
         }
     }
 

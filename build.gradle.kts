@@ -12,9 +12,12 @@
 //     但 AGP 9.1 最高只支持 API 36.1 ⇒ 必须用 AGP 9.4.0（支持 API 37）
 //     ⇒ AGP 9.4 对应 Gradle 9.6.0（此组合已在 WeType_UI_Enhanced 工程验证过）
 //   ⇒ 因此本工程工具链锁定为：
-//        AGP 9.4.0 + Gradle 9.6.0 + JDK 17 + compileSdk 37 + Kotlin 2.4.20
+//        AGP 9.4.0 + Gradle 9.6.0 + JDK 21 + compileSdk 37 + Kotlin 2.4.20
+//   ⚠️ JDK 为什么是 21 而不是官方最低要求的 17：MiuiX 0.9.4 的**全部** class 文件都是
+//     JVM target 21（major 65），17 编不过 —— 完整推导见 gradle.properties 里那段。
 plugins {
     id("com.android.application") version "9.4.0" apply false
-    id("org.jetbrains.kotlin.android") version "2.4.20" apply false
+    // ⛔ 不再声明 `org.jetbrains.kotlin.android`（KGP）：Kotlin 由 AGP 内置支持提供，
+    //   版本跟着 AGP 走。⛔ 连"降级回 KGP"也不行 —— 见 gradle.properties 里那段迁移记录。
     id("org.jetbrains.kotlin.plugin.compose") version "2.4.20" apply false
 }

@@ -1,0 +1,12 @@
+<?xml version="1.0" encoding="utf-8"?>
+<!-- 由 design/icon/gen_icon.py 生成，不要手改 -->
+<vector xmlns:android="http://schemas.android.com/apk/res/android"
+    xmlns:aapt="http://schemas.android.com/aapt"
+    android:width="108dp"
+    android:height="108dp"
+    android:viewportWidth="108"
+    android:viewportHeight="108">
+    <path android:fillColor="#FF000000" android:fillType="evenOdd" android:pathData="M76.93,49.34 L81.92,46.95 L78.73,39.24 L73.51,41.08 L66.92,34.49 L68.76,29.27 L61.05,26.08 L58.66,31.07 L49.34,31.07 L46.95,26.08 L39.24,29.27 L41.08,34.49 L34.49,41.08 L29.27,39.24 L26.08,46.95 L31.07,49.34 L31.07,58.66 L26.08,61.05 L29.27,68.76 L34.49,66.92 L41.08,73.51 L39.24,78.73 L46.95,81.92 L49.34,76.93 L58.66,76.93 L61.05,81.92 L68.76,78.73 L66.92,73.51 L73.51,66.92 L78.73,68.76 L81.92,61.05 L76.93,58.66 Z M42.6,54 a11.4,11.4 0 1,0 22.8,0 a11.4,11.4 0 1,0 -22.8,0 Z" />
+    <path android:fillColor="#FF000000" android:pathData="M46.12,51.6 H61.88 A1.92,1.92 0 0 1 63.8,53.52 V54.48 A1.92,1.92 0 0 1 61.88,56.4 H46.12 A1.92,1.92 0 0 1 44.2,54.48 V53.52 A1.92,1.92 0 0 1 46.12,51.6 Z" />
+    <path android:fillColor="#FF000000" android:pathData="M53.52,44.2 H54.48 A1.92,1.92 0 0 1 56.4,46.12 V61.88 A1.92,1.92 0 0 1 54.48,63.8 H53.52 A1.92,1.92 0 0 1 51.6,61.88 V46.12 A1.92,1.92 0 0 1 53.52,44.2 Z" />
+</vector>

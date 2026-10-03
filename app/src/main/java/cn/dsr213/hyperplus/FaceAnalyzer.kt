@@ -30,8 +30,20 @@ data class FaceFrame(
     val rotationDegrees: Int,
     /** 本帧相对上一帧的间隔，用来算有效帧率 */
     val intervalMs: Long,
-    /** ★ 本帧为了找到脸而多转了多少度（0/90/180/270）；无脸时是最后试的那个 */
+    /**
+     * ★ 本帧为了找到脸而多转了多少度（0/90/180/270）；无脸时是最后试的那个。
+     *
+     * ⚠️ 2026-09-25 起它是**最优角**（摆得最正的那个），不再是"第一个勉强认出的那个" ——
+     *    原因见 [ExtraPicker]：采纳次优角会把角度整体还原错 180°，表现为"横屏切反"。
+     */
     val extraRotation: Int = 0,
+    /**
+     * ★ 采纳该角度时，脸在那一帧图里**看起来**歪了多少度（ML Kit 的 headEulerAngleZ 原值）。
+     *
+     * 这条是给事后分析用的证据位：`|rawTilt|` 越大说明这一帧越是"勉强认出来的"，
+     * 角度还原越不可信。修好之后它应当稳定落在 45° 以内。
+     */
+    val apparentTiltDeg: Float = Float.NaN,
     /** ★ 本帧一共试了几个角度（1 = 热点一次命中；4 = 全试遍还没脸） */
     val triedCount: Int = 0,
     /** ★ 低置信帧：eulerZ 与 eyeRoll 两路测量对不上（差超过 maxConsistencyDeg） */
@@ -58,8 +70,13 @@ data class FaceFrame(
  * ## 搜索策略（热点优先，平均接近 1 次）
  *
  * 人脸角度是**连续变化**的，上一帧命中的角度极可能这一帧还有效。
- * 所以按 `[上次命中, +90, +180, +270]` 的顺序试，**第一个检出就停**：
- * 稳态 1 次、跨象限 2 次、全失明才 4 次。实测平均值看 `sumTriedCount / totalFrames`。
+ * 所以按 `[上次命中, +90, +180, +270]` 的顺序试。
+ *
+ * ★ 2026-09-25 修正：**不再"第一个检出就停"**，改为「摆得最正的那个才采纳」——
+ *   勉强认出的那一个会把还原角度整体错 180°（用户实测：「竖屏切横屏有概率变成相反的横屏」）。
+ *   规则与推导见 [ExtraPicker]；判定条件只看 |headEulerAngleZ| 是否 ≤ 45°。
+ *   稳态（脸的角度与热点角相差 ≤45°）仍然只检测一次，功耗不变；
+ *   只有"勉强能认"的边界帧会多试几个角度。
  *
  * ## 角度修正（实测得到的 1:1 关系）
  *
@@ -95,8 +112,14 @@ class FaceAnalyzer(
     private val onFrame: (FaceFrame) -> Unit
 ) : ImageAnalysis.Analyzer {
 
+    /**
+     * 一次命中的载荷：脸本体 + 那张图的尺寸（用来算归一化面积）。
+     * 90/270 角的图会交换宽高，所以尺寸必须跟命中一起带走，不能事后另取。
+     */
+    private data class HitPayload(val face: Face, val w: Int, val h: Int)
+
     private val detector = FaceDetection.getClient(
-        FaceDetectorOptions.Builder()
+            FaceDetectorOptions.Builder()
             // ACCURATE 的容差比 FAST 大（±75° vs ±60°），且耗时同量级 ⇒ 这里选 ACCURATE
             .setPerformanceMode(FaceDetectorOptions.PERFORMANCE_MODE_ACCURATE)
             .setLandmarkMode(FaceDetectorOptions.LANDMARK_MODE_ALL)
@@ -137,6 +160,25 @@ class FaceAnalyzer(
 
     /** 当前"最优额外旋转"。绝大多数帧用它一次就命中 */
     @Volatile private var bestExtra = 0
+
+    /**
+     * ★ 2026-10-03 新增：把"热点角"归零，让**下一帧从 `extra = 0`（不旋转的直接测量）重新找起**。
+     *
+     * 为什么需要它（真机现场 `_probe/_err180_2026-10-03_0824.log`）：
+     * `euler = 原始倾角 + extra`，而实测**任何** `extra` 下 ML Kit 报的原始倾角都接近 0
+     * （它会把这个角"认成"正立）⇒ **写出去的方向几乎完全由 `extra` 决定**。
+     * 而 `bestExtra` 是**跨 burst 存活的全局量**：相机保温期（见 `CAMERA_KEEP_WARM_MS`）
+     * 帧还在喂进来，那几张"手正在挥动"的帧一样会把它改掉 —— 于是下一轮 burst 从
+     * 一个**错误的热点角**起搜，8 帧全部沿用同一个错角、投票 8:0 一边倒，
+     * 连"两路交叉验证"也一起被骗（euler 与 eye 是同时翻的）。
+     *
+     * ⇒ 一旦上层判定"这一轮的方向与重力矛盾"，就调本函数把热点角清回 0，
+     *   让后续帧拿**直接测量**重来一遍，而不是继续在错角上滚雪球。
+     *   ⚠️ 只在"有证据说明它错了"时才清 —— 稳态下清了会白白多试 1~3 次检测（功耗）。
+     */
+    fun resetHot() {
+        bestExtra = 0
+    }
 
     /** 本帧试了几个角度 */
     @Volatile var lastTriedCount = 0; private set
@@ -208,11 +250,11 @@ class FaceAnalyzer(
             sinceFullScan++
             if (sinceFullScan >= backoffProbeEvery) { sinceFullScan = 0; full } else intArrayOf(hot)
         }
-        attempt(image, media, rotation, order, 0, now, interval, t0)
+        attempt(image, media, rotation, order, 0, now, interval, t0, ExtraPicker())
     }
 
     /**
-     * 按 [order] 逐个角度试，**第一个检出的就停**。
+     * 按 [order] 逐个角度试，取**摆得最正**的那一次命中（规则与推导见 [ExtraPicker]）。
      * ⚠️ 递归点必须放在 `addOnCompleteListener` 里而不是 `addOnSuccessListener` 里 ——
      * 否则下一轮的 `process()` 会叠在上一轮还没收尾的时候，串行性就没了。
      */
@@ -224,9 +266,17 @@ class FaceAnalyzer(
         idx: Int,
         now: Long,
         interval: Long,
-        t0: Long
+        t0: Long,
+        picker: ExtraPicker<HitPayload>
     ) {
         if (idx >= order.size) {
+            val hit = picker.result()
+            if (hit != null) {
+                // 所有角度试完，仍然没有"够正"的一次命中 —— 退而取倾斜最小的那个。
+                // 这一帧的可信度天然更低，交给上面的两路交叉验证（lowConf）去把关。
+                emit(image, hit, order.size, baseRotation, now, interval, t0)
+                return
+            }
             // 四个角度全试过仍是空 ⇒ 判定"这帧没人脸"
             val dm = SystemClock.elapsedRealtime() - t0
             lastTriedCount = order.size
@@ -255,7 +305,9 @@ class FaceAnalyzer(
         var found: Face? = null
         var w = 0
         var h = 0
-        val proceedToNext: () -> Unit = { attempt(image, media, baseRotation, order, idx + 1, now, interval, t0) }
+        val next: () -> Unit = {
+            attempt(image, media, baseRotation, order, idx + 1, now, interval, t0, picker)
+        }
 
         runCatching {
             val input = InputImage.fromMediaImage(media, rot)
@@ -265,27 +317,39 @@ class FaceAnalyzer(
                 .addOnSuccessListener { faces -> found = pickFace(faces, w, h) }
                 .addOnCompleteListener {
                     val f = found
-                    if (f != null) emit(image, f, extra, idx + 1, w, h, baseRotation, now, interval, t0)
-                    else proceedToNext()
+                    if (f == null) {
+                        next()
+                        return@addOnCompleteListener
+                    }
+                    // ★ 这里就是修掉"横屏切反"的关键：不是"检出就采纳"，
+                    //   而是问一句"这一个摆得够正吗"。不够正就继续试下一个，
+                    //   最后取最正的那个 —— 因为角度还原公式只在脸接近正立时才成立。
+                    val good = picker.record(extra, f.headEulerAngleZ, HitPayload(f, w, h))
+                    if (good) {
+                        emit(image, picker.result()!!, idx + 1, baseRotation, now, interval, t0)
+                    } else {
+                        next()
+                    }
                 }
         }.onFailure {
             Log.w(TAG, "detect threw at extra=$extra: ${it.message}")
-            proceedToNext()
+            next()
         }
     }
 
     private fun emit(
         image: ImageProxy,
-        face: Face,
-        extra: Int,
+        hit: ExtraPicker.Hit<HitPayload>,
         tried: Int,
-        w: Int,
-        h: Int,
         baseRotation: Int,
         now: Long,
         interval: Long,
         t0: Long
     ) {
+        val face = hit.payload.face
+        val w = hit.payload.w
+        val h = hit.payload.h
+        val extra = hit.extra
         val dm = SystemClock.elapsedRealtime() - t0
         bestExtra = extra
         lastTriedCount = tried
@@ -328,7 +392,8 @@ class FaceAnalyzer(
                     intervalMs = interval,
                     extraRotation = extra,
                     triedCount = tried,
-                    lowConf = lowConf
+                    apparentTiltDeg = hit.apparentTiltDeg,
+                    lowConf = lowConf,
                 )
             )
         } finally {

@@ -1,0 +1,353 @@
+<?xml version="1.0" encoding="utf-8"?>
+<!--
+  ★ 繁體中文。用語以**台灣習慣**為準（螢幕 / 設定 / 執行 / 校正 / 應用 / 資料），
+    ⛔ 不要直接拿簡體字做字形轉換 —— 「屏幕」「校准」「数据」在繁體裡另有說法。
+
+  ⚠️ 鍵值必須與 `values/strings.xml` 一一對應，漏一個就會在繁體介面下掉回英文。
+-->
+<resources>
+    <string name="app_name">HyperPlus</string>
+    <string name="tile_label">自適應旋轉</string>
+
+    <!-- ================================================ 語言選擇器 -->
+    <string name="lang_name_auto">跟隨系統</string>
+
+    <string name="lang_page_title">語言</string>
+    <string name="lang_page_summary">介面語言</string>
+    <string name="lang_page_desc">選擇本應用程式的介面語言。</string>
+    <string name="lang_page_hint">改完立即生效。</string>
+
+    <!-- ================================================ 底欄 -->
+    <string name="tab_function">功能</string>
+    <string name="tab_settings">設定</string>
+
+    <!-- ================================================ 主頁：設定 -->
+    <string name="settings_title">設定</string>
+    <string name="settings_channel_broken">⚠️ 設定暫時不會生效</string>
+    <string name="settings_channel_default">本應用程式的系統模組沒有啟用。</string>
+    <string name="settings_channel_fix">修好之前所有開關都不生效 —— 在 LSPosed 裡把 HyperPlus 自己也勾進作用域（不只是「系統介面」）。</string>
+    <!-- 設定通道自檢的**原因**（2026-10-03 從 AppPrefs 的硬編碼中文搬來，字面量逐字一致） -->
+    <string name="channel_ready">已就緒：設定寫在共享目錄裡，旋轉服務讀得到</string>
+    <string name="channel_not_ready">未就緒：設定只寫進了應用程式私有目錄，旋轉服務讀不到。請在 LSPosed 裡把 HyperPlus 自己也勾進作用域，然後重啟本應用程式。</string>
+    <string name="settings_section_monitor">監控與除錯</string>
+    <string name="settings_status_title">目前狀態</string>
+    <string name="settings_status_summary">執行狀態 · 方向控制 · 目前方向 · 半自動按鈕</string>
+    <string name="settings_diag_title">診斷</string>
+    <string name="settings_diag_summary">觸發與讓位 · 辨識指標 · 資料記錄 · 最近事件</string>
+    <string name="settings_section_app">應用</string>
+    <string name="settings_about_title">關於</string>
+    <string name="settings_about_summary">版本 · 檢查更新 · 執行方式 · 免責聲明</string>
+    <string name="settings_language_title">語言</string>
+    <string name="settings_language_summary">跟隨系統 · 简体中文 · 繁體中文 · English</string>
+
+    <!-- ================================================ 二級頁：關於 -->
+    <string name="about_title">關於</string>
+    <string name="about_version">版本</string>
+    <string name="about_checking">（檢查更新中…）</string>
+    <string name="about_run_mode">執行方式</string>
+    <string name="about_run_mode_value">常駐背景，不用一直開著本應用程式</string>
+    <string name="about_check_update">檢查更新</string>
+    <string name="about_disclaimer_title">免責聲明</string>
+    <string name="about_disclaimer_body">本應用程式透過 LSPosed 調整螢幕方向，屬於非官方改造：不改系統檔案，核心功能也不需要 root，但請了解風險後再使用。出問題時在 LSPosed 裡停用模組即可恢復原狀。</string>
+
+    <!-- ================================================ 主頁：功能 -->
+    <string name="function_title">功能</string>
+    <string name="function_section_rotation">旋轉</string>
+    <string name="function_section_experimental">實驗</string>
+    <string name="function_rotation_title">旋轉增強</string>
+    <string name="function_rotation_summary">內螢幕：%1$s；外螢幕交給系統處理（模式 / 懸浮按鈕 / 方向校正 / 應用程式清單）</string>
+    <string name="function_state_probing">正在讀取執行狀態…</string>
+    <string name="function_state_noservice">讀不到旋轉服務</string>
+    <string name="function_state_offline">旋轉服務已離線</string>
+    <string name="function_state_running">執行中</string>
+    <string name="function_state_probing_long">正在讀取旋轉服務的狀態…</string>
+    <string name="function_no_report">還沒有收到任何狀態回報。最常見的原因是模組沒在 LSPosed 裡啟用（那樣只能儲存設定，轉不動螢幕）。</string>
+    <string name="function_lost">最後一次回應在 %1$d 秒前（超過 %2$d 秒視為離線）；系統介面重新啟動後會自動恢復，稍等即可。</string>
+    <string name="function_mode_system">目前模式是「跟隨系統」，本應用程式不介入</string>
+    <string name="function_not_active">尚未生效</string>
+    <string name="function_await_first">等待首次辨識 —— 轉動一下手機</string>
+
+    <!-- ================================================ 實驗功能（2026-10-03） -->
+    <!-- ⚠️ experimental_warning 是**使用者給的原話**（簡中逐字對譯），⛔ 不許順手改措辭 -->
+    <string name="function_experimental_summary">仍在試驗中的功能，預設不出現在旋轉增強裡</string>
+    <string name="experimental_title">實驗功能</string>
+    <string name="experimental_warning">以下功能仍處於實驗階段，效果可能極度不穩定，請謹慎使用</string>
+    <string name="experimental_adaptive_title">自適應旋轉</string>
+    <string name="experimental_adaptive_summary">開啟後，到「旋轉增強」的「模式」裡選它</string>
+    <string name="experimental_adaptive_note">關掉它只是讓這一項從「模式」裡消失，不會改動你目前正在使用的模式。</string>
+
+    <!-- ================================================ 校正提示（toast） -->
+    <string name="calib_ok">已校正</string>
+    <string name="calib_no_face">沒擷取到人臉，請對準臉再試</string>
+    <string name="calib_bad_angle">兩點角度差不足，請確認已把手機轉了 90°</string>
+    <string name="calib_timeout">等待系統介面回應逾時，請重試</string>
+    <string name="calib_unavailable">旋轉服務目前無法使用</string>
+    <string name="open_settings_failed">無法開啟系統設定：%1$s</string>
+
+    <!-- ================================================ 方向名（rotName） -->
+    <string name="rot_0">直向</string>
+    <string name="rot_1">橫向（相機在左）</string>
+    <string name="rot_2">倒向</string>
+    <string name="rot_3">橫向（相機在右）</string>
+    <string name="rot_none">尚無結果</string>
+
+    <!-- ================================================ 通用零件 -->
+    <string name="common_back">返回</string>
+    <string name="kv_format">%1$s：%2$s</string>
+    <string name="outer_banner_title">此螢幕不會生效，請開啟內螢幕</string>
+    <string name="form_inner">內螢幕</string>
+    <string name="form_outer">外螢幕</string>
+
+    <!-- ================================================ 模式名與說明 -->
+    <string name="mode_label_system">跟隨系統</string>
+    <string name="mode_label_adaptive">自適應旋轉（人臉）</string>
+    <string name="mode_label_semi">半自動旋轉（點擊確認）</string>
+    <string name="mode_short_system">跟隨系統</string>
+    <string name="mode_short_adaptive">人臉</string>
+    <string name="mode_short_semi">半自動</string>
+    <string name="mode_summary_system">不干預：完全跟隨系統的「自動旋轉」設定</string>
+    <string name="mode_summary_adaptive">用前置相機辨識你臉的方向，自動轉螢幕</string>
+    <string name="mode_summary_semi">轉動手機時右下角彈出按鈕，點一下才轉螢幕；不用相機，最省電</string>
+
+    <!-- ================================================ 擷取策略 -->
+    <string name="strategy_label_power">省電優先</string>
+    <string name="strategy_label_responsive">反應優先</string>
+    <string name="strategy_summary_power">用完就關相機，每次辨識會有一段啟動等待</string>
+    <string name="strategy_summary_responsive">相機常駐，反應更快但更耗電</string>
+
+    <!-- ================================================ 辨識 / 校驗 -->
+    <string name="vote_none">本輪還沒有辨識結果</string>
+    <string name="vote_no_consensus">本輪辨識 %1$s（沒有一致結論）</string>
+    <string name="vote_winner">本輪辨識 %1$s → 多數為「%2$s」（共 %3$d 次）</string>
+    <string name="vote_few">本輪辨識 %1$s → 樣本太少（共 %2$d 次），沿用上一次的判斷</string>
+
+    <string name="sign_unknown">暫時無法校驗（手機平放時沒有參照，拿起來會自動恢復）</string>
+    <string name="sign_ok">✅ 已校驗正確（與手機擺放方向比對 %1$d 次一致）</string>
+    <string name="sign_accum">正在累積校驗樣本（目前參照：%1$s）</string>
+    <string name="sign_flip">⚠️ 偵測到方向可能相反（%1$d 次不符 / %2$d 次相符），樣本足夠後會自動修正</string>
+    <string name="sign_checking">校驗中：%1$d 次相符 / %2$d 次不符（相符占多時確認為正確）</string>
+
+    <!-- ================================================ 時長 -->
+    <string name="dur_sec">%1$d 秒</string>
+    <string name="dur_min_sec">%1$d 分 %2$d 秒</string>
+    <string name="dur_hr_min">%1$d 小時 %2$d 分</string>
+
+    <!-- ================================================ 半自動狀態 -->
+    <string name="semi_no_overlay">半自動：旋轉按鈕無法顯示 —— 到系統設定給本應用程式「顯示在其他應用程式上層」權限</string>
+    <string name="semi_low_layer">半自動：按鈕已出現 %1$d 次、點擊生效 %2$d 次。⚠️ 按鈕的顯示層級較低，轉到位後邊角可能被狀態列擋住一塊</string>
+    <string name="semi_idle">半自動：轉動手機時，右下角會出現旋轉按鈕</string>
+    <string name="semi_counts">半自動：按鈕已出現 %1$d 次、點擊生效 %2$d 次</string>
+
+    <!-- ================================================ 結構化失敗計數 -->
+    <string name="errs_none">無</string>
+    <string name="errs_bind">相機綁定 %1$s 次</string>
+    <string name="errs_rotw">方向寫入 %1$s 次</string>
+    <string name="errs_rotr">方向讀取 %1$s 次</string>
+    <string name="errs_fg">前景應用程式讀取 %1$s 次</string>
+    <string name="errs_other">%1$s %2$s 次</string>
+    <string name="errs_join">、</string>
+
+    <!-- ================================================ 讓位解釋 -->
+    <string name="takeover_gated">「%1$s」%2$s → 本應用程式暫時不控制螢幕方向、交回系統處理（離開這個應用程式後會自動恢復）</string>
+    <string name="takeover_gated_current">目前應用程式</string>
+    <string name="takeover_no_grant">尚未生效：缺少「修改系統設定」權限 —— 到「旋轉增強」頁點一下授權</string>
+    <string name="takeover_unknown">尚未生效（暫時查不出原因，可到「診斷」頁看詳細狀態）</string>
+
+    <string name="stop_whitelist">在你的豁免清單裡</string>
+    <string name="stop_uncontrollable">實測在這個螢幕上旋轉無效</string>
+    <string name="stop_other">不在本應用程式的控制範圍內</string>
+
+    <!-- ================================================ 執行階段 -->
+    <string name="phase_ready">執行中</string>
+    <string name="phase_starting">正在啟動</string>
+    <string name="phase_stopped">已停止</string>
+    <string name="phase_failed">啟動失敗</string>
+
+    <!-- ================================================ 「目前狀態」頁讀數 -->
+    <string name="ro_phase">執行狀態：%1$s</string>
+    <string name="ro_mode">目前模式：%1$s</string>
+    <string name="ro_takeover">螢幕方向控制：%1$s</string>
+    <string name="ro_takeover_active">正在控制（依人臉辨識的結果轉螢幕）</string>
+    <string name="ro_rotation">目前方向：%1$s</string>
+    <string name="ro_sign">方向基準：%1$s</string>
+    <string name="ro_vote">本輪辨識：%1$s</string>
+    <string name="ro_conflict">前置相機被占用：%1$d 次（辨識過程中被其他應用程式搶走）</string>
+    <string name="ro_display">系統目前方向：%1$s</string>
+    <string name="ro_uptime">已執行：%1$s</string>
+    <string name="ro_heartbeat">服務回應：%1$d 秒前（%2$s）</string>
+    <string name="ro_normal">正常</string>
+    <string name="ro_unresponsive">無回應</string>
+
+    <!-- ================================================ 二級頁：目前狀態 -->
+    <string name="status_title">目前狀態</string>
+    <string name="status_no_report">還沒有收到狀態回報。通常是模組沒在 LSPosed 裡啟用 —— 那樣只能儲存設定，轉不動螢幕。</string>
+    <string name="status_background">退到背景、鎖定螢幕、重新啟動後依然有效。</string>
+    <string name="status_phase_suffix">（目前狀態：%1$s）</string>
+    <string name="status_screen_rotation">目前螢幕：%1$s　方向：%2$s</string>
+
+    <!-- ================================================ 預設方向 -->
+    <string name="slot_title">預設方向</string>
+    <string name="slot_desc">展開後，內螢幕保持這個方向。</string>
+    <string name="slot_root_note">需要 root 權限，首次點選會彈出授權請求。</string>
+    <string name="slot_unsupported">這台裝置的系統不支援方向設定。</string>
+    <string name="slot_failed">未能修改，請確認已授予 root 權限。</string>
+
+    <!-- ================================================ 二級頁：旋轉增強 -->
+    <string name="rotation_title">旋轉增強</string>
+    <string name="rotation_mode_section">模式</string>
+    <string name="rotation_outer_reason">外螢幕完全交給系統處理，這一頁的設定此刻都不生效；展開到內螢幕後再依它們運作。</string>
+    <string name="rotation_mode_title_active">模式（內螢幕 · 正在生效）</string>
+    <string name="rotation_mode_title">模式（內螢幕）</string>
+    <string name="rotation_mode_note">只對「內螢幕」生效；外螢幕完全交給系統處理。</string>
+    <string name="rotation_section_switches">開關</string>
+    <string name="rotation_gate_title">清單裡的應用程式不干預（玩遊戲時不搶資源）</string>
+    <string name="rotation_gate_on">清單裡的應用程式不彈按鈕、不改方向；遊戲和長影片預設在裡面，不跟手就把它移出去</string>
+    <string name="rotation_gate_off">已關閉：所有應用程式都正常工作（玩遊戲時可能多占一點效能）</string>
+    <string name="rotation_handoff_title">讓位時恢復系統的自動旋轉</string>
+    <string name="rotation_handoff_on">讓位時把方向交回系統，全螢幕看影片、看圖仍能轉螢幕</string>
+    <string name="rotation_handoff_off">讓位時保持目前方向（自動旋轉仍是關的）</string>
+    <string name="rotation_hint_title">按鈕等待時間</string>
+    <string name="rotation_hint_summary">轉完手機後有 %1$d 秒可以點它；逾時自動消失（僅半自動模式）</string>
+    <string name="rotation_hint_value">%1$d 秒</string>
+    <string name="rotation_notice_title">使用提醒</string>
+    <string name="rotation_notice_body">「注視感知 / 智慧掃碼」會占用前置相機，方向就會偶爾跟不上 —— 建議關掉它：設定 → 鎖定螢幕 → 注視感知。\n\n別把本應用程式從最近使用清單劃掉：那樣相機會被系統相機占住，自適應會失效。</string>
+    <string name="rotation_notice_button">開啟系統設定</string>
+    <string name="rotation_preview_title">預覽旋轉按鈕</string>
+    <string name="rotation_preview_body">按鈕只在手機方向與螢幕方向不一致時出現。點它會立刻彈一次（位置和平時一樣，螢幕右下角）；沒反應就到「診斷」頁看看。</string>
+    <string name="rotation_preview_button">彈一次按鈕給我看</string>
+    <string name="rotation_calib_title">方向校正</string>
+    <string name="rotation_calib_hint_start">螢幕轉錯方向時，依下面兩步校正。</string>
+    <string name="rotation_calib_hint_step2">① 已完成，接著做 ②。</string>
+    <string name="rotation_calib_hint_done">已校正。方向再次異常時重做一次。</string>
+    <string name="rotation_calib_step1">① 手機直向正對自己，臉部擺正，停留 2 秒</string>
+    <string name="rotation_calib_step1_btn">① 記直向</string>
+    <string name="rotation_calib_step1_btn_done">① 記直向 ✓</string>
+    <string name="rotation_calib_step2">② 手機橫向、相機朝左，臉部仍正立，停留 2 秒</string>
+    <string name="rotation_calib_step2_btn">② 記橫向</string>
+    <string name="rotation_calib_step2_btn_done">② 記橫向 ✓</string>
+    <string name="rotation_calib_camera_note">校正需用相機，請先關閉相機與視訊通話。</string>
+    <string name="rotation_calib_reset">恢復預設（需重新校正）</string>
+
+    <!-- ================================================ 即時角度 -->
+    <string name="live_zero_inner">0° = 內螢幕的預設方向（已換算）</string>
+    <string name="live_zero_outer">0° = 螢幕的預設方向（手機直向正對自己）</string>
+    <string name="live_starting">正在啟動讀數…（旋轉服務最多 2 秒才會開始）</string>
+    <string name="live_stopped">讀數已停止（%1$d 秒前）—— 離開本頁再進來就會重開。若一直不行，可能是前置相機被別的應用程式占著。</string>
+    <string name="live_no_face">沒有辨識到人臉 —— 把手機拿到面前、臉對著螢幕。</string>
+    <string name="live_kv_sector">辨識到的方向</string>
+    <string name="live_kv_display">系統目前方向</string>
+    <string name="live_kv_form">目前螢幕</string>
+    <string name="live_kv_raw">原始讀數</string>
+    <string name="live_raw_suffix">%1$s°（相對裝置，未換算）</string>
+    <string name="live_footer">讀數期間會占用前置相機；轉螢幕照常運作。離開本頁自動停止，最長 3 分鐘。</string>
+    <string name="live_dial_0">直</string>
+    <string name="live_dial_1">左橫</string>
+    <string name="live_dial_2">倒</string>
+    <string name="live_dial_3">右橫</string>
+
+    <!-- ================================================ 二級頁：診斷 -->
+    <string name="diag_title">診斷</string>
+    <string name="diag_no_data">尚無資料 —— 旋轉服務沒有執行，或本次開機還沒有上報。</string>
+    <string name="diag_kv_sensor">方向感測器</string>
+    <string name="diag_sensor_on">已啟用（含陀螺儀備援）</string>
+    <string name="diag_sensor_off">無法使用 / 未知</string>
+    <string name="diag_kv_write">修改系統設定權限</string>
+    <string name="diag_granted">已具備</string>
+    <string name="diag_missing">缺少</string>
+    <string name="diag_kv_cfg">設定同步</string>
+    <string name="diag_cfg_not_ready_app">未就緒 · %1$s</string>
+    <string name="diag_cfg_not_ready_engine">未就緒 · 旋轉服務讀不到（%1$s）</string>
+    <string name="diag_cfg_unknown">未知（本次狀態裡沒有這一項）</string>
+    <string name="diag_cfg_ok">已就緒（應用程式側與服務側都正常）</string>
+    <string name="diag_cfg_default_reason">本應用程式的系統模組沒有啟用</string>
+    <string name="diag_cfg_no_reason">原因未上報</string>
+    <string name="diag_kv_camera">前置相機編號</string>
+    <string name="diag_camera_none">—（未就緒）</string>
+    <string name="diag_camera_ok">%1$s（本機有多個可用，會自動切換）</string>
+    <string name="diag_kv_gate">應用程式清單控制</string>
+    <string name="diag_gate_unreadable">讀不到目前應用程式 → 清單控制未生效（一切照常運作）</string>
+    <string name="diag_gate_gated_rotate">已讓位：%1$s%2$s，已恢復系統自動旋轉</string>
+    <string name="diag_gate_gated_hold">已讓位：%1$s%2$s，保持目前方向</string>
+    <string name="diag_gate_normal">正常工作（%1$s 不在清單裡） · 累計讓位 %2$d 次</string>
+    <string name="diag_gate_current_app">目前應用程式</string>
+    <string name="diag_kv_fg_orientation">目前應用程式宣告的方向</string>
+    <string name="diag_fg_orientation">%1$s（僅診斷用，不參與判斷）</string>
+    <string name="diag_kv_whitelist">生效的應用程式清單</string>
+    <string name="diag_whitelist_value">%1$d 筆（含未安裝的預設項，所以比介面上看到的勾多）</string>
+    <string name="diag_kv_conflict">相機被占用</string>
+    <string name="diag_conflict_none">0 次（沒被占用過）</string>
+    <string name="diag_conflict_some">%1$d 次（前置相機被其他應用程式占著，那幾輪沒有辨識成功）</string>
+    <string name="diag_kv_uptime">已執行</string>
+    <string name="diag_kv_heartbeat">服務回應</string>
+    <string name="diag_heartbeat_ok">%1$d 秒前 · 正常</string>
+    <string name="diag_heartbeat_bad">%1$d 秒前 · 無回應（超過 %2$d 秒）</string>
+    <string name="diag_kv_errs">失敗計數</string>
+    <string name="diag_metrics_no_data">尚無資料。可能是剛啟動，或本次開機還沒有觸發過。</string>
+    <string name="diag_kv_burst">辨識輪次</string>
+    <string name="diag_kv_switch">方向切換</string>
+    <string name="diag_switch_value">%1$d 次</string>
+    <string name="diag_kv_frames">累計處理 / 辨識到人臉</string>
+    <string name="diag_kv_vote">本輪辨識</string>
+    <string name="diag_kv_open_ms">相機啟動耗時</string>
+    <string name="diag_open_ms_value">%1$d 毫秒（啟動到第一幀）</string>
+    <string name="diag_kv_sign">方向基準校驗</string>
+    <string name="diag_kv_display">系統目前方向</string>
+    <string name="diag_kv_calib">校正</string>
+    <string name="diag_calib_done_confirmed">角度偏移 %1$s°（方向基準已校驗）</string>
+    <string name="diag_calib_done_unconfirmed">角度偏移 %1$s°（方向基準尚未校驗）</string>
+    <string name="diag_calib_none">還沒有校正</string>
+    <string name="diag_section_trigger">觸發與讓位</string>
+    <string name="diag_section_metrics">辨識指標</string>
+    <string name="diag_section_log">資料記錄</string>
+    <string name="diag_log_note">執行記錄由系統側保存，本應用程式無權讀取或關閉，所以這裡沒有開關。</string>
+    <string name="diag_section_events">最近事件</string>
+    <string name="diag_events_none">無</string>
+
+    <!-- ================================================ 應用程式清單 -->
+    <string name="wl_section_note">清單說明</string>
+    <string name="wl_gate_off">⚠️ 上面的總開關是關著的 —— 這份清單此刻不生效，改動不會有反應。</string>
+    <string name="wl_explain">開啟後，該應用程式的方向交給系統，本應用程式不再干涉。</string>
+    <string name="wl_on_title">已開啟（%1$d）</string>
+    <string name="wl_empty">清單是空的 —— 所有應用程式都歸本應用程式管；想放行誰，在下面清單裡打開它。</string>
+    <string name="wl_tag_legend">「預設清單」= 出廠內建；「手動指定」= 你自己開的。</string>
+    <string name="wl_section_search">搜尋</string>
+    <string name="wl_search_label">應用程式名稱或套件名稱</string>
+    <string name="wl_count">已安裝 %1$d 個應用程式 · 清單內 %2$d</string>
+    <string name="wl_count_uc"> · 實測轉不動 %1$d</string>
+    <string name="wl_count_match"> · 符合 %1$d 個</string>
+    <string name="wl_reset">恢復預設（把關掉的預設項打開）</string>
+    <string name="wl_clear">清除實測記錄（%1$d 筆）</string>
+    <string name="wl_clear_note">清除後會重新開始偵測，約需一兩秒。</string>
+    <string name="wl_section_installed">已安裝應用程式（A-Z）</string>
+    <string name="wl_loading">正在讀取應用程式清單…</string>
+    <string name="wl_no_match">沒有符合「%1$s」的應用程式。</string>
+    <string name="wl_tag_default"> · 預設清單</string>
+    <string name="wl_tag_manual"> · 手動指定</string>
+    <string name="wl_tag_uc"> · 實測轉不動</string>
+    <string name="wl_own_note">本應用程式預設不在清單裡，設定頁也歸它管（會看到旋轉按鈕）。想讓設定頁跟隨系統旋轉，就打開這一格。</string>
+    <string name="uc_note">實測轉不動：本應用程式試過在%1$s上旋轉，但螢幕沒變化，所以不再控制它。</string>
+
+    <!-- ================================================ 捐贈卡 -->
+    <string name="donate_title">支持 HyperPlus</string>
+    <string name="donate_qr_desc">微信捐贈 QR Code</string>
+    <string name="donate_pitch">作者開發不易，求求賞口飯吃。</string>
+    <string name="donate_saved">已儲存到相簿（圖片 / HyperPlus）</string>
+    <string name="donate_save_failed">儲存失敗，請稍後重試</string>
+    <string name="donate_saving">正在儲存…</string>
+    <string name="donate_save_button">儲存 QR Code 到相簿</string>
+    <string name="donate_terms">關於收費：Alpha 階段將始終保持免費；不排除將來推出 Beta 或正式版後，部分功能收費的可能。</string>
+
+    <!-- ================================================ 更新對話框 -->
+    <string name="update_title">發現新版本</string>
+    <string name="update_subtitle">%1$s\u3000（目前 %2$s）</string>
+    <string name="update_no_notes">作者沒有填寫更新說明，點「去下載」查看詳情。</string>
+    <string name="update_later">稍後</string>
+    <string name="update_download">去下載</string>
+    <!-- 手動「檢查更新」的回饋（Toast）。⚠️ update_fail_http / update_fail_exception 帶的是不可翻譯的補充（HTTP 碼 / 異常名稱） -->
+    <string name="update_up_to_date">已是最新版本 %1$s</string>
+    <string name="update_check_failed">檢查失敗：%1$s</string>
+    <string name="update_fail_no_release">倉庫還沒有已發布的 Release</string>
+    <string name="update_fail_http">HTTP %1$s</string>
+    <string name="update_fail_no_tag">回應裡沒有 tag_name</string>
+    <string name="update_fail_exception">%1$s</string>
+</resources>

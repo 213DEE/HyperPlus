@@ -10,6 +10,7 @@ import android.provider.Settings
 import android.util.Log
 import cn.dsr213.hyperplus.AdaptiveEngine
 import cn.dsr213.hyperplus.AppPrefs
+import cn.dsr213.hyperplus.EngineErrors
 import cn.dsr213.hyperplus.PrefsBridge
 import cn.dsr213.hyperplus.RotateMode
 import kotlinx.coroutines.CoroutineScope
@@ -72,10 +73,14 @@ internal object EngineHost {
      */
     @Volatile private var startedAtMs = 0L
 
-    private var pingObserver: ContentObserver? = null
-    private var calibObserver: ContentObserver? = null
-    private var lastPing = Int.MIN_VALUE
-    @Volatile private var lastCalibReq = 0
+    /**
+     * 上次处理过的标定请求值（`"<时间戳>|<步骤>"`）。
+     *
+     * ★ 存的是**原始字符串**而不是步骤号：配置通道的通知不带键名，
+     *   只能靠"值变了"判定有新请求。用步骤号比较的话，用户连着点两次同一个按钮
+     *   （值不同、步骤相同）就会漏掉第二次。
+     */
+    @Volatile private var lastCalibReq: String? = null
 
     val isDead: Boolean get() = dead
 
@@ -127,7 +132,7 @@ internal object EngineHost {
                 startedAtMs = SystemClock.elapsedRealtime()
                 starting = false
                 publishPhase(hostCtx, "ready")
-                installBus(hostCtx)
+                installConfigWatcher(hostCtx)
                 installStatePublisher(hostCtx, eng)
                 installLivenessTick(hostCtx)
                 Log.i(TAG, "✅ 引擎已在 SystemUI 内启动（常驻，不随前台/后台变化）")
@@ -147,8 +152,10 @@ internal object EngineHost {
      * 做三件事，顺序不能反：
      *   ① 停引擎（内部会 `releaseTakeover(restoreSystem = true)` → 还原系统自动旋转）；
      *   ② 再兜一次原始设置 —— 万一引擎没走到解绑那一步（例如构造期就炸了），
-     *      这里直接把 `accelerometer_rotation` 写回 [AppPrefs.RESTORE_AUTO_ROTATE]
+     *      这里直接把 `accelerometer_rotation` 写回 [AppPrefs.restoreTarget] 记的原值
      *      并清掉接管标志，避免用户遇到"屏幕转不动"；
+     *      ⚠️ 若那个值是哨兵 [AppPrefs.AUTO_ROTATE_UNTOUCHED]（= 我们**从没改过** accel），
+     *         **一个字节都不写** —— 用户本来就锁着的设置必须原样留着。
      *   ③ 标记 [dead]，**不再重启**。
      */
     private fun panic(hostCtx: Context, why: String, e: Throwable?, publishFailure: Boolean = false) {
@@ -161,11 +168,27 @@ internal object EngineHost {
 
         runCatching {
             if (AppPrefs.isTakeoverActive()) {
-                Settings.System.putInt(
+                // ★★ 三道闸（2026-09-30，与 `releaseTakeover` / `recoverOrphanTakeover`
+                //   同一套判据，改一处必须改三处）：
+                //   ① `target != 哨兵` —— **我们从没改过 accel** 时一律不写
+                //      （用户本来就锁着，那个 0 是他的选择，不是我们的残留）。
+                //   ② **只有"还是我们留下的 0"才动** —— 用户在这期间自己把自动旋转开回来了
+                //      （`cur == 1`）就不该被我们覆盖掉。旧版无条件写，等于篡改用户的选择。
+                //   ③ 还原成 **`restoreTarget()`（接管前原值）**，不是常量 1 —— 否则
+                //      "接管前锁着"的用户会被我们强行解开锁定。
+                val target = AppPrefs.restoreTarget()
+                val cur = Settings.System.getInt(
                     hostCtx.contentResolver,
                     Settings.System.ACCELEROMETER_ROTATION,
-                    AppPrefs.RESTORE_AUTO_ROTATE,
+                    1,
                 )
+                if (cur == 0 && target != AppPrefs.AUTO_ROTATE_UNTOUCHED) {
+                    Settings.System.putInt(
+                        hostCtx.contentResolver,
+                        Settings.System.ACCELEROMETER_ROTATION,
+                        target,
+                    )
+                }
                 AppPrefs.setTakeoverActive(false)
             }
         }
@@ -178,85 +201,102 @@ internal object EngineHost {
         }
     }
 
-    // ================================================================ 总线：探活 / 远程标定
+    // ================================================================ 配置通道：远程标定
+    //
+    // ★ 探活（ping/pong）在 2026-09-28 的改造里**被整个删掉**了。
+    //   它唯一的用途是让 App 判断"模块在不在"，从而决定自己要不要起本地引擎；
+    //   而 App 侧引擎已经不存在（用户拍板"只保留 SystemUI 的引擎"），
+    //   这个判断再也没有下游，留着只是多一份要维护的协议。
+    //   "引擎活着吗"改由 STATE 的 `phase=` 与 HEARTBEAT 回答 —— 更直接，也更难说谎。
 
     /**
-     * 装上两条 App → 宿主的请求通道（复用本项目已实测的「设置键 + ContentObserver」机制）：
-     *  - **探活**：App 写 `bus_ping`（自增），这里原值回写 `bus_pong` —— App 据此判断
-     *    「模块在不在」，从而决定自己要不要启本地引擎（避免两套引擎抢相机）；
-     *  - **远程标定**：App 写 `bus_calib_req`，这里用宿主的相机采一次样，
-     *    把结果写回 `bus_calib_result`。App 界面上的两个校准按钮因此在托管模式下依然可用。
+     * 装上「标定请求」通道：App 写自己的 prefs，这里通过 [ModulePrefs] 的文件监控收到通知。
      *
-     * ★ 两条都挂在专用 HandlerThread 上，绝不占用 SystemUI 主线程。
+     * ★ 为什么改走 prefs 而不是 `Settings.System`：后者要求 **App 写**非公开键，
+     *   而普通应用写不了（判据见 [cn.dsr213.hyperplus.PrefsBridge] 的类注释）⇒
+     *   会被迫引入 root。换到 prefs 之后 App 只写自己的文件，零权限、零 root。
      */
-    private fun installBus(hostCtx: Context) {
-        val cr = hostCtx.contentResolver
-        val t = HandlerThread("hyperplus-bus").apply { start() }
-        val h = Handler(t.looper)
-
-        val po = object : ContentObserver(h) {
-            override fun onChange(selfChange: Boolean) {
-                runCatching {
-                    val v = PrefsBridge.readInt(cr, PrefsBridge.PING, 0)
-                    if (v == lastPing) return
-                    lastPing = v
-                    PrefsBridge.writeInt(cr, PrefsBridge.PONG, v)
-                }.onFailure { Log.w(TAG, "探活回执失败", it) }
-            }
+    private fun installConfigWatcher(hostCtx: Context) {
+        ModulePrefs.subscribe {
+            runCatching { onConfigChanged(hostCtx) }
+                .onFailure { Log.w(TAG, "配置变更处理失败（已吞掉）", it) }
         }
-        pingObserver = po
-        PrefsBridge.watch(cr, PrefsBridge.PING, po)
-
-        val co = object : ContentObserver(h) {
-            override fun onChange(selfChange: Boolean) {
-                runCatching {
-                    val req = PrefsBridge.readInt(cr, PrefsBridge.CALIB_REQ, 0)
-                    if (req == 0 || req == lastCalibReq) return
-                    lastCalibReq = req
-                    PrefsBridge.writeInt(cr, PrefsBridge.CALIB_REQ, 0)   // 复位，可反复触发
-                    doCalibrationRequest(hostCtx, req)
-                }.onFailure { Log.w(TAG, "远程标定失败", it) }
-            }
-        }
-        calibObserver = co
-        PrefsBridge.watch(cr, PrefsBridge.CALIB_REQ, co)
-
-        Log.i(TAG, "总线就绪：探活 ${PrefsBridge.PING} / 远程标定 ${PrefsBridge.CALIB_REQ}")
+        // ★ 启动时把当前值记为"已处理"，**不**执行它。
+        //   理由：文件是持久化的，里面很可能躺着几天前那次标定请求。
+        //   若在这里补跑一次，就会在引擎启动时莫名其妙地开一次相机 —— 副作用远大于收益。
+        //   代价只是"App 在引擎启动前点的按钮会被忽略"，用户再点一次即可。
+        runCatching { lastCalibReq = ModulePrefs.getString(cn.dsr213.hyperplus.PrefsBridge.CALIB_REQ, null) }
+        Log.i(TAG, "配置通道已接入：标定请求键 ${cn.dsr213.hyperplus.PrefsBridge.CALIB_REQ}")
     }
 
     /**
-     * 处理一次远程标定请求。
-     *  - `req == 1` → 记竖屏基准（[AdaptiveEngine.applyCalibrationBaseline]）
-     *  - `req == 2` → 记左横屏、定方向（[AdaptiveEngine.applyCalibrationAxis]）
+     * 配置文件有变化 → 检查是不是新来的标定请求。
      *
-     * ★ 应用动作在**宿主侧**完成（相机也在宿主手里），所以结果通过镜像自然回流到 App，
-     *   App 不需要自己算，也不会出现两边标定值打架。
+     * ★ 配置项本身（模式 / 策略 / 两个开关）的刷新由 `AppPrefs.initHost` 注册的
+     *   那个订阅负责，这里只管"标定请求"这一件事 —— 两个订阅互不干扰。
+     *
+     * ⚠️ 回调跑在框架的文件监控线程上（**不是** SystemUI 主线程），而标定要开相机会阻塞，
+     *   所以再丢到 [bootThread] 去做。
      */
-    private fun doCalibrationRequest(hostCtx: Context, req: Int) {
+    private fun onConfigChanged(hostCtx: Context) {
+        val raw = ModulePrefs.getString(cn.dsr213.hyperplus.PrefsBridge.CALIB_REQ, null) ?: return
+        if (raw == lastCalibReq) return
+        lastCalibReq = raw
+        // 值形如 "<时间戳>|<步骤>"。时间戳要**原样带回结果** —— 它是这次请求的唯一标识，
+        // 让 App 能区分"我这次的结果"和"上一次同样是 step=1 的旧结果"。
+        val token = raw.substringBefore('|')
+        val step = raw.substringAfter('|', "").toIntOrNull() ?: return
+        Handler(bootThread?.looper ?: Looper.getMainLooper()).post {
+            runCatching { doCalibrationRequest(hostCtx, token, step) }
+                .onFailure { Log.w(TAG, "标定请求处理失败", it) }
+        }
+    }
+
+    /**
+     * 处理一次标定请求（步骤见 `AppPrefs.CALIB_STEP_*`）：
+     *  - `1` → 记竖屏基准（[AdaptiveEngine.applyCalibrationBaseline]）
+     *  - `2` → 记左横屏、定方向（[AdaptiveEngine.applyCalibrationAxis]）
+     *  - `3` → 清空标定（**不开相机**，纯清账）
+     *
+     * ★ 应用动作在**宿主侧**完成（相机与 ML Kit 都在宿主手里），App 那边没有帧可采。
+     *   结果写回 `Settings.System`，App 读它 —— 读系统设置零门槛，两边都不需要 root。
+     *
+     * @param token 本次请求的唯一标识（App 生成的时间戳），原样带回结果里。
+     *   ⚠️ 为什么需要它：结果里只有 `step` 的话，用户**连点两次同一个按钮**
+     *   （比如连点两次"记竖屏基准"）时，App 会读到上一次留下的同 step 结果，
+     *   于是"还没采样就说已完成"。带上 token 才能严格配对。
+     */
+    private fun doCalibrationRequest(hostCtx: Context, token: String, step: Int) {
         val eng = engine
         if (eng == null) {
-            publishCalibResult(hostCtx, req, if (dead) "stopped" else "starting")
+            publishCalibResult(hostCtx, token, step, if (dead) "stopped" else "starting")
+            return
+        }
+        if (step == AppPrefs.CALIB_STEP_CLEAR) {
+            runCatching { eng.resetCalibration() }
+            publishCalibResult(hostCtx, token, step, "ok")
             return
         }
         eng.captureCalibrationSample { roll ->
             val status = when {
                 roll == null || !roll.isFinite() -> "noface"
-                req == 1 -> {
+                step == AppPrefs.CALIB_STEP_BASELINE -> {
                     eng.applyCalibrationBaseline(roll)
                     "ok"
                 }
                 else -> if (eng.applyCalibrationAxis(roll)) "ok" else "badangle"
             }
-            publishCalibResult(hostCtx, req, status)
+            publishCalibResult(hostCtx, token, step, status)
         }
     }
 
-    private fun publishCalibResult(hostCtx: Context, req: Int, status: String) {
-        val line = "$req|$status"
+    /** 结果格式：`"<token>|<step>|<status>"`（跨进程契约，App 侧 `ModuleLink` 按它解析） */
+    private fun publishCalibResult(hostCtx: Context, token: String, step: Int, status: String) {
+        val line = "$token|$step|$status"
         Handler(bootThread?.looper ?: Looper.getMainLooper()).post {
             runCatching {
                 PrefsBridge.writeString(hostCtx.contentResolver, PrefsBridge.CALIB_RESULT, line)
-                Log.i(TAG, "远程标定结果 → $line")
+                Log.i(TAG, "标定结果 → $line")
             }
         }
     }
@@ -351,6 +391,74 @@ internal object EngineHost {
         append("|rot=").append(s.rotation)
         append("|disp=").append(s.displayRotation)
         append("|decider=").append(s.deciderState)
+        // 多帧投票（本轮票面 / 获胜方向 / 有效票数 / 是否已定论）—— 只追加，不改已有字段
+        append("|votes=").append(s.voteCounts)
+        append("|vwin=").append(s.voteWinner)
+        append("|vvalid=").append(s.voteValid)
+        append("|vconf=").append(if (s.voteConfident) 1 else 0)
+        // 重力当尺子：符号位校验（见 [cn.dsr213.hyperplus.OrientationFusion]）——
+        // 只追加，不改已有字段。`grav` = 重力参照扇区（-1 = 这一路当前不可用）；
+        // `sgnS`/`sgnF` = "实测等于重力 / 等于镜像"的分辨帧数；`sgnOK` = 是否已被数据验证。
+        // 摆在界面上是为了让"符号位到底有没有被证据钉死"一眼可见，不用再翻日志猜。
+        append("|grav=").append(s.gravitySector)
+        append("|sgnS=").append(s.signSame)
+        append("|sgnF=").append(s.signFlip)
+        append("|sgnOK=").append(if (s.signConfirmed) 1 else 0)
+        append("|conflict=").append(s.conflictCount)
+        // 当前在用的前摄 id（2026-09-25 新增，只追加）—— 引擎会在 5 个前摄间轮换，
+        // 界面上必须能看到"现在到底在用哪一个"，否则轮换逻辑等于不可观测。
+        append("|cid=").append(s.cameraId)
+        // —— 前台门控（2026-09-28）：fg=是否停手 / fgr=读得到吗 / handoff=停手时是否交还自动旋转 ——
+        //   ⚠️ 2026-09-29 起 `fgpkg` / `fgori` 是**最近一次巡检的读数**（进不进门都更新），
+        //     不再是"触发停手的那个"。没停手时它们仍然有值 —— 这正是排查
+        //     「判据为什么没命中」所必需的（用户报的「外屏抖音弹按钮但转不动」就靠它定位）。
+        append("|fg=").append(if (s.foregroundGated) 1 else 0)
+        append("|fgpkg=").append(s.foregroundPkg)
+        append("|fgori=").append(s.foregroundOrientation)
+        // 判据按哪块屏的名单算的（OUTER / INNER）
+        // ⚠️ 2026-09-29 起"外屏专属豁免"两条已删 ⇒ 这格**只剩形态本身**的观测价值
+        //    （外屏不再介入，但引擎仍如实报它量到的形态）。
+        append("|fgform=").append(s.foregroundForm)
+        // ★ 引擎**实测**到的最小宽度 dp（2026-09-29 加）。它与 `fgform` 必须**配套**读：
+        //   本机内屏 608dp / 外屏 425dp、阈值 512dp，所以
+        //   `fgform=INNER` + `swdp=608` = 正常；
+        //   `fgform=OUTER` + `swdp=608` = **采纳值陈旧**（本次「内屏桌面不能转」那个 bug，
+        //   成因是引擎只在启动时量一次形态）；
+        //   `swdp=425` 而人确实在用内屏 = **测量本身**错（读到了另一块屏）。
+        //   只看 `fgform` 是分不出后两种的。
+        append("|swdp=").append(s.formProbeDp)
+        // 停手是哪条豁免造成的（WHITELIST / UNCONTROLLABLE；空 = 没停手）
+        append("|fgstop=").append(s.foregroundStop)
+        append("|fgr=").append(if (s.foregroundReadable) 1 else 0)
+        append("|gate=").append(s.skipGateCount)
+        append("|handoff=").append(if (s.handoffRotate) 1 else 0)
+        // 前台门控**总开关**（2026-09-28 新增，只追加）：用户报"该转不转"时的逃生阀。
+        // ⚠️ 字段名与上面的 `gate`（跳过次数）刻意区分成 `gateon`，别混。
+        append("|gateon=").append(if (s.gateEnabled) 1 else 0)
+        // A 方案（2026-09-29）：不可控名单条数。它 > 0 就说明"有应用被实测判定转不动"，
+        // 与 `fgstop=UNCONTROLLABLE` 配套看 —— 前者是"记了多少条"，后者是"此刻命中了没有"。
+        append("|uc=").append(s.uncontrollableCount)
+        // —— 半自动模式（2026-09-28）：semi=弹出次数 / semitgt=目标方向 / semitap=点击生效次数
+        //    ovl=悬浮窗是否可用（false ⇒ 半自动根本弹不出按钮，界面必须如实提示）——
+        append("|semi=").append(s.semiShownCount)
+        append("|semitgt=").append(s.lastSemiTarget)
+        append("|semitap=").append(s.semiTappedCount)
+        append("|ovl=").append(if (s.overlayUsable) 1 else 0)
+        // ★ 屏幕上此刻**是否挂着**按钮（2026-09-29，用户点名要查"反复旋转会不会叠出好几个"）。
+        //   ⚠️ 它只可能是 0 / 1 —— 出现任何"计数 > 1"的形态都意味着有窗口泄漏，
+        //      所以这里刻意报**布尔**而不是个数：读的时候不会产生"2 是不是正常"的歧义。
+        append("|hintAlive=").append(if (s.hintAlive) 1 else 0)
+        // —— 本轮新增（2026-09-28，只追加）——
+        //   `hint` = 引擎**实际读到**的按钮等待时长（毫秒）。
+        //     ★ 它存在的唯一理由：回答"我在界面把滑条拖到 20 秒，引擎到底收到了吗"。
+        //       在此之前这个链路只能靠"弹一次按钮看日志"来验证 —— 而弹按钮需要
+        //       真的把手机转到位，代价高。直接读引擎进程自己的 AppPrefs，
+        //       就能把「界面写的」「文件里的」「引擎读到的」三者一眼对完。
+        //   `ovlt` = 生效的窗口类型（2017=状态栏子面板 层号181000 / 2038=普通悬浮窗 层号111000）。
+        //     ★ 提层级**可能静默失败**（被 ROM 拒了就降级），而降级后的按钮看着一切正常、
+        //       只是角上仍被状态栏挡 —— 那正是用户报的问题。有这一格才能一眼分辨。
+        append("|hint=").append(AppPrefs.hintMs.value)
+        append("|ovlt=").append(s.overlayType)
         append("|burst=").append(s.burstCount)
         append("|frames=").append(s.totalFrames)
         append("|faces=").append(s.facesFound)
@@ -363,6 +471,32 @@ internal object EngineHost {
         append("|openMs=").append(s.lastOpenMs)
         append("|uptime=").append(engineUptimeSec())
         append("|startedAt=").append(if (startedAtMs <= 0L) 0L else startedAtMs / 1000)
+        // —— 配置通道（2026-09-28 单引擎改造后新增，只追加）——
+        //   `cfgold` = 引擎进程有没有成功读到 App 的配置。它**是**新架构唯一的单点：
+        //   读不到 ⇒ 界面上改什么都白改（引擎永远按默认值走），所以必须让界面能如实显示。
+        //   `cfgmsg` = 失败原因。⚠️ 值里不能出现 `|`（那是本格式的分隔符），先替换掉。
+        append("|cfgold=").append(if (AppPrefs.configOk.value) 1 else 0)
+        append("|cfgmsg=").append(AppPrefs.configDiag.value.replace('|', '/'))
+        // —— 白名单 + 换屏搬运（2026-09-28 判据换成应用白名单后新增，只追加）——
+        //   `wlN` = 引擎手上**生效白名单**的条数（默认清单 ∪ 用户加的 − 用户关的 + 恒豁免的自己）。
+        //     ★ 界面里勾的那份列表是"**已安装**应用"，与生效集合不是一回事（没装的包也在集合里，
+        //       见 AppWhitelist）—— 出问题时要对的就是这一格。
+        //   `pofs` = 本屏的**安装朝向偏移**（0 = 外屏那一类 / 2 = 内屏那一类）。
+        //     ★ 它是"展开内屏倒置 180°"那个 bug 的判据：展开后它应当**从 0 变 2**。
+        //       若一直显示 0，说明反射没读到 installOrientation（那时是按"不换算"在跑）。
+        //       ⚠️ 别把它和 `sw`/`rot` 混起来看：它描述的是**硬件装的朝向**，不随转屏变。
+        append("|wlN=").append(s.whitelistSize)
+        append("|pofs=").append(s.panelOffset)
+        // —— 结构化失败计数（2026-10-03 新增，只追加）——
+        //   形如 `bind:3,rotw:1`；**一次都没出错 = 空串**。
+        //   ★ 为什么要专门加这一格：引擎的失败路径**一律吞异常**（跑在 SystemUI 里，
+        //     未捕获异常 = 状态栏崩），代价是"静默失败"根本查不出来 ——
+        //     2026-10-03「默认方向不生效」那轮就是因为失败只留一句普通日志、
+        //     几分钟被高频日志冲掉而无法定位。计数**跟着状态串走**，不会被冲掉。
+        //   ⚠️ 这个字段会"变化才上报"里的"变化"多起来一点点（出错时它每次 +1），
+        //     但 2 秒节流还在，量级与心跳同级，可以接受。
+        //   ⛔ 别把它做成滑窗 / 速率 —— 要看的是"这次开机以来出过没有、几次"。
+        append("|errs=").append(EngineErrors.snapshot())
     }
 
     /** 本引擎已运行秒数（上报那一刻的快照）；还没起来时返回 0（不拿整机 uptime 冒充） */

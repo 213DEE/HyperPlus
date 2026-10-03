@@ -1,32 +1,97 @@
 <?xml version="1.0" encoding="utf-8"?>
-<manifest xmlns:android="http://schemas.android.com/apk/res/android">
+<manifest xmlns:android="http://schemas.android.com/apk/res/android"
+    xmlns:tools="http://schemas.android.com/tools">
+
+    <!--
+      ★★ 为什么要 `tools:overrideLibrary`（2026-09-29，实测踩出来的，别删）
+         `miuix-blur-android:0.9.4` 自己的 AndroidManifest 声明的是 `minSdkVersion 33`，
+         而本工程 `minSdk = 30` ⇒ 清单合并直接失败：
+             uses-sdk:minSdkVersion 30 cannot be smaller than version 33 declared in
+             library [top.yukonga.miuix.kmp:miuix-blur-android:0.9.4]
+         （同批引入的 `miuix-nav-android` 是 24，其余 miuix-* 是 23/24，**只有 blur 是 33**。）
+
+         ⇒ 两种处置：把本工程 minSdk 提到 33（**砍掉 Android 11/12 的支持**），
+           或者 override 掉它的声明、由**我们自己**在运行期判版本。
+            这里选后者，理由是它和本工程既有的设计**完全一致**：
+            库之所以要 33，是因为它整条模糊管线建在 `RuntimeShader`(AGSL) 上 ——
+            而这一点在引入它的时候就写进了 `ui/LiquidGlassBar.kt`：
+              `glassUsable = Build.VERSION.SDK_INT >= 33 && backdrop != null`
+            ⇒ API < 33 时我们**一次都不碰** blur 的任何入口
+              （`rememberLayerBackdrop()` 与 `Modifier.layerBackdrop()` 也都有同一道闸，
+               见 `ui/HyperPlusApp.kt`），外观退化成实心胶囊、导航照常可用。
+
+      ⚠️ 这条 override 等于**我们向构建系统承诺"API 级别差异已自行处理"**。
+         所以它成立的前提就是上面那几道 `SDK_INT >= 33` 的闸**必须一直存在**：
+         将来谁把闸拆了、又留着这行 override，就是一个只在 Android 12 以下崩的 bug。
+      ⚠️ 也**没有**在这里写 `android:minSdkVersion` —— 那个值由 build.gradle.kts 提供，
+         在这儿再写一份会变成第二个真值来源（合并时会打架）。
+    -->
+    <uses-sdk tools:overrideLibrary="top.yukonga.miuix.kmp.blur" />
 
     <uses-permission android:name="android.permission.CAMERA" />
-    <uses-permission android:name="android.permission.FOREGROUND_SERVICE" />
-    <uses-permission android:name="android.permission.FOREGROUND_SERVICE_CAMERA" />
-    <uses-permission android:name="android.permission.POST_NOTIFICATIONS" />
+    <!--
+      ★ 半自动悬浮按钮提层级用（2026-09-28 用户点名「悬浮窗层级太低，旋转 180° 后被状态栏遮挡」）。
+
+      它是 `signature|privileged` 权限，普通 App 拿不到 —— 但**照样必须声明**：
+      `checkSelfPermission` 只认"清单里请求过、且被平台授予"的权限，
+      不声明的话哪怕进程真有资格也恒返回 DENIED，于是探测失灵、层级退回原样。
+      声明它没有任何副作用：平台不授予的话，加窗时抛 SecurityException，
+      代码会自动降级回 `TYPE_APPLICATION_OVERLAY`（按钮照常能用，只是层级低）。
+
+      ⚠️ 名字是 `INTERNAL_SYSTEM_WINDOW`，**不是** `SYSTEM_ALERT_WINDOW`（后者是用户可见的
+      「显示在其他应用上层」授权，本工程不需要，理由见下面那段注释）。
+    -->
+    <uses-permission android:name="android.permission.INTERNAL_SYSTEM_WINDOW" />
     <!-- 版本检测：查 GitHub Releases（匿名公开 API，不带任何凭据） -->
     <uses-permission android:name="android.permission.INTERNET" />
     <uses-permission android:name="android.permission.ACCESS_NETWORK_STATE" />
-    <!-- 接管屏幕方向：写 Settings.System.USER_ROTATION。授权走系统
-         「修改系统设置」页，不是运行时弹窗 -->
-    <uses-permission android:name="android.permission.WRITE_SETTINGS" />
+    <!--
+      读取**已安装应用列表**（白名单设置页要按 A-Z 列出用户装了什么、让他逐项开关）。
+
+      ⚠️ Android 11（API 30）起有包可见性限制：不声明它，`queryIntentActivities` 只会返回
+      「本应用自己 + 少数系统包」，别的应用一个都查不到 —— 症状是白名单页里**只有一行**，
+      而且不会报任何错（这是最容易被误判成"代码写错了"的那种失败）。
+
+      它属于**敏感权限**（Google Play 上架要单独申报理由），本工程是自用/私有发布、
+      不经商店分发，所以直接声明。理由正当：白名单的**判据输入**就是"设备上装了哪些应用"，
+      拿不到这个列表，用户在界面上就只能手打包名。
+    -->
+    <uses-permission android:name="android.permission.QUERY_ALL_PACKAGES" />
 
     <!--
-      ⛔ 刻意**不**声明 WRITE_SECURE_SETTINGS —— 实测 + AOSP 源码双重确认它在这件事上没用：
+      ⚠️ 这里**没有** WRITE_SETTINGS / SYSTEM_ALERT_WINDOW / FOREGROUND_SERVICE —— 不是漏了，
+         是单引擎架构（2026-09-28）让它们全部失去用途：
+
+         - **写屏幕方向**（`USER_ROTATION` / `ACCELEROMETER_ROTATION`）：只有引擎在写，
+           而引擎跑在 SystemUI 进程里，那两个权限对它是 SYSTEM_FIXED 授予（自带、不需要申请）。
+           App 进程改造后**一行 Settings 写入都没有**，所以自己不需要 WRITE_SETTINGS。
+         - **半自动的悬浮按钮**（`RotateHintOverlay`）：同样只由引擎创建，SystemUI 是 system uid，
+           AppOps 对 uid < 10000 直接放行 ⇒ 不需要用户授权「显示在其他应用上层」。
+           改造前"引擎在 App 进程"那种形态才需要它，那条路已随 App 侧引擎一起删除。
+         - **前台服务 / 常驻通知**：引擎的宿主是常驻的 SystemUI，不存在需要前台服务保命的场景
+           （Android 15+ 也已禁止 camera 类型前台服务开机自启）。
+
+      ⛔ 也刻意**不**声明 WRITE_SECURE_SETTINGS —— 实测 + AOSP 源码双重确认它在这件事上没用：
 
          `SettingsProvider.mutateSystemSetting()` 里，该权限只用来**跳过前面的 AppOps 检查**；
          后面那道 `enforceRestrictedSystemSettingsMutationForCallingPackage` 是**无条件**执行的，
          而它只放行三种情况：① SYSTEM/SHELL/ROOT uid；② 键在 `Settings.System.PUBLIC_SETTINGS`；
-         ③ 包带 `PRIVATE_FLAG_PRIVILEGED`（特权包，安装期由 /system/priv-app + 白名单决定）。
+         ③ 包带 `PRIVATE_FLAG_PRIVILEGED`（特权包）。
 
          本机实证：`pm grant WRITE_SECURE_SETTINGS` 之后 `dumpsys` 显示 `granted=true`、
          `checkSelfPermission` 也返回 GRANTED，**但写自定义键仍然抛**
          `You cannot keep your settings in the secure settings.`
 
-      ⇒ 真正的解法是走 ① 的 uid 豁免：借 root 的 uid 代写
-        （`su -c "settings put system <键> <值>"`），见 RootBridge。
-        所以这里不需要申请任何权限；写不进去时界面会引导用户授予 root。
+      ⇒ 历史结论：普通应用**原理上**写不了非公开的 `Settings.System` 键。
+        所以 2026-09-28 之前 App 侧只能借 root（`su -c settings put ...`）来下发配置。
+
+      ⚠️ 更正（2026-10-03）：上面那句原来接着写的是"root 依赖已彻底消失" —— **那句话不再成立**。
+        配置下发那条链路确实不再要 root（改走 App 自己的 prefs 文件，见 `module/ModulePrefs`），
+        但 2026-10-03 起「默认方向」改成 **App 借 root 直写内屏的方向槽位**
+        （`user_rotation_inner`，见 `RootShell` / `docs/默认方向校准入口_直接改槽位_2026-10-03.md`）。
+        那是**用户拍板**的取舍：写槽位这件事只有 root 能做，而本模块的装机前提就是"有 LSPosed ⇒ 一定有 root"。
+        ⇒ 准确说法是：**核心链路不需要 root；「默认方向」这一项需要**。
+        ⛔ 别再把"完全不需要 root"写进任何面向用户的文案（`AboutPage` 里那句也已按此修正）。
     -->
 
     <uses-feature android:name="android.hardware.camera.front" android:required="true" />
@@ -44,9 +109,20 @@
          代价：与系统版本强耦合，且 SystemUI 崩 = 状态栏崩，因此模块侧必须把所有
                异常都吞掉（见 HyperPlusModule 的纪律说明）。
     -->
+    <!-- 桌面图标（2026-10-03 新增）。
+         此前 <application> 上**根本没有 android:icon** ⇒ 系统给的是默认图标。
+         ★ 图标规范（两份官方原文都已核对）：
+           Android  m2.material.io : 108dp 画布 / 72dp 可见 / 安全区 Ø66 圆
+           小米     dev.mi.com 1511 : 方形要直角、周围无透明像素、避免大圆角
+         落地方式 = 自适应图标（mipmap-anydpi-v26，minSdk 30 恒命中）
+           + 各密度传统 PNG（给只认位图的系统界面用，同时也是小米要的"包内大图"）
+         ⚠️ 别把它和下面 QS Tile 的 @drawable/ic_rotate_adaptive 搞混：那个是 24dp 单色
+           图标，磁贴会自行 tint，**不是**桌面图标。 -->
     <application
         android:allowBackup="false"
+        android:icon="@mipmap/ic_launcher"
         android:label="@string/app_name"
+        android:roundIcon="@mipmap/ic_launcher_round"
         android:supportsRtl="true"
         android:theme="@style/Theme.FaceRotateMvp">
 
@@ -60,6 +136,23 @@
         <meta-data
             android:name="xposedminversion"
             android:value="93" />
+        <!--
+          ★ 显式声明本模块要用「新版 XSharedPreferences」（配置通道，见 module/ModulePrefs）。
+
+          框架侧的判定是 `xposedminversion > 92 || xposedsharedprefs`（见 LSPosed 的
+          `LoadedApkCreateCLHooker.hookNewXSP`），所以上面那行 93 其实已经满足；
+          这里再写一遍是**把意图写在明面上**：将来谁把 xposedminversion 降回 92，
+          配置通道不会跟着悄悄失效。
+
+          ⚠️ 它生效的前提是**本应用进程也要被注入**，而按 LSPosed 的作用域缓存，
+          一个模块只会被注入「它自己勾选过的包」以及它自己
+          （`// Always allow the module to inject itself`）。
+          ⇒ **在 LSPosed 里必须把 HyperPlus 自己也勾进作用域**，否则配置写不到共享目录，
+          引擎读不到。App 会自检并把这条提示出来（见 AppPrefs.appChannelOk）。
+        -->
+        <meta-data
+            android:name="xposedsharedprefs"
+            android:value="true" />
         <meta-data
             android:name="xposedscope"
             android:resource="@array/xposed_scope" />
