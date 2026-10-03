@@ -30,6 +30,15 @@ object ModuleLink {
      */
     data class State(
         val phase: String,
+        /**
+         * ★ **启动熔断的连续失败次数**（2026-10-03 新增，只追加）。
+         *
+         * 只在 `phase == "halted"` 时有意义 —— 那时引擎已经**不再自动启动**
+         * （理由见 `EngineTuning.BOOT_BREAKER_THRESHOLD`），界面据此如实说明"连续失败几次"。
+         * ⚠️ 老格式摘要里没有这个字段 ⇒ 兜底 0；那不是"真的失败过 0 次"，
+         *   只是老引擎报不出这个数（而老引擎也没有熔断机制）。
+         */
+        val breakerAttempts: Int,
         val mode: String,
         val takeover: Boolean,
         /** 引擎判定的目标方向（-1 = 未判定） */
@@ -330,6 +339,8 @@ object ModuleLink {
         return runCatching {
             State(
                 phase = kv["phase"] ?: "unknown",
+                // ★ 只在 phase=halted 时有意义；老格式没有这个字段 ⇒ 0（见字段注释）
+                breakerAttempts = kv["attempts"]?.toIntOrNull() ?: 0,
                 mode = kv["mode"] ?: "SYSTEM",
                 takeover = kv["takeover"] == "1",
                 rotation = kv["rot"]?.toIntOrNull() ?: -1,

@@ -1,7 +1,13 @@
 package cn.dsr213.hyperplus.module
 
+import android.content.BroadcastReceiver
+import android.content.Context
+import android.content.ContentResolver
+import android.content.Intent
+import android.content.IntentFilter
 import android.content.SharedPreferences
 import android.util.Log
+import cn.dsr213.hyperplus.ConfigChannel
 import cn.dsr213.hyperplus.PrefsBridge
 import de.robv.android.xposed.XSharedPreferences
 import java.util.concurrent.CopyOnWriteArrayList
@@ -27,8 +33,11 @@ import java.util.concurrent.CopyOnWriteArrayList
  *   「此模块使用了已废弃且即将移除的功能」。届时 `getPreferencesDir()` 不再重定向到 safe-zone、
  *   `checkMode` 不再放行 `MODE_WORLD_READABLE` ⇒ **配置下行（App → 引擎）会断**，
  *   且**失败是静默的**（读不到不抛异常，现象只是"设置点了没反应"）。
- *   ⇒ 动这个类之前先读 `docs/配置通道_nsp废弃警告_2026-10-03.md`（证据链 + 两条出路对比）。
- *   ❓ 那条"退回旧式"的路（`xposedminversion=82` + 删 `xposedsharedprefs`）**尚未验证**。
+ *   ⇒ 动这个类之前先读 `docs/配置通道_nsp废弃警告_2026-10-03.md`（证据链 + 出路对比）。
+ *   ❌ **那条"退回旧式"的路（`xposedminversion=82` + 删 `xposedsharedprefs`）已证否**
+ *   （2026-10-03，该文档 §2.4）：`checkMode` / `getPreferencesDir` 这两个 hook **就装在 nsp 的
+ *   判定分支里**，关掉 nsp 等于关掉它们；且 App 私有目录是 **700**，SystemUI 连遍历都做不到。
+ *   ⇒ **警告消不掉，除非先把这条通道整个换掉**（候选方案见该文档 §六）。
  *
  * 前提：模块的 `xposedminversion >= 93`（或声明 `xposedsharedprefs` 元数据）——
  * 本工程 Manifest 里**本来就是 93**，等于零成本满足。
@@ -111,6 +120,26 @@ internal object ModulePrefs {
     @Volatile private var xs: XSharedPreferences? = null
 
     /**
+     * ★★★ **广播镜像**（2026-10-03 新增）—— 现在配置下行的**主通道**。
+     *
+     * App 每改一次设置就把**全量快照**用一条广播发过来（[ConfigChannel]），
+     * 到达后存在这里；启动时还会先从 `Settings.System`（[PrefsBridge.MIRROR]）读回一份，
+     * 于是**引擎重启不需要 App 配合**。
+     *
+     * ★ 读取优先级：**镜像优先，[xs] 兜底**。
+     *   这么排是为了让"新通道已经通了、老通道还在"的过渡期**不产生行为差异** ——
+     *   镜像里有的键以镜像为准，镜像还没到的键（升级后 App 没被打开过）继续用老通道。
+     *   等 [xs] 那条彻底拆掉（M2），这里就只剩镜像一个来源。
+     */
+    @Volatile private var mirror: Map<String, Any?>? = null
+
+    /** 引擎侧写 [PrefsBridge.MIRROR] 用的 resolver（[attachTransport] 灌入） */
+    @Volatile private var cr: ContentResolver? = null
+
+    /** 接收 App 推送的广播接收者（动态注册，幂等） */
+    @Volatile private var pushReceiver: BroadcastReceiver? = null
+
+    /**
      * 本进程内的订阅者。
      *
      * ★ 对框架**只注册一个**监听器（[registered]），收到变化后广播给这里的所有订阅者。
@@ -132,7 +161,7 @@ internal object ModulePrefs {
     private var warnedEmpty = false
 
     /** 配置通道是否就绪（拿得到且读得动那个文件）。供状态上报，让界面能如实显示 */
-    val available: Boolean get() = xs != null
+    val available: Boolean get() = xs != null || mirror != null
 
     /** 通道诊断信息（不可用时界面/日志要看的原因） */
     @Volatile var diag: String = "未初始化"
@@ -209,6 +238,133 @@ internal object ModulePrefs {
         }
     }
 
+    // ---------------------------------------------------------------- 广播通道（2026-10-03 新增）
+
+    /** 反向"请推一次配置"是否已经问过（只问一次，避免 App 不在时反复发广播） */
+    @Volatile private var requestedOnce = false
+
+    /**
+     * 装上**广播通道**：读回镜像 → 注册接收者 → 必要时反向问 App 要一次配置。
+     *
+     * **幂等**；失败只记日志 —— 调用方是 SystemUI 进程，绝不能因为通道装不上就抛。
+     *
+     * ⚠️ 调用时机有**两处，缺一不可**：
+     *   ① 正常启动：`EngineHost.bootOn` 里 `AppPrefs.initHost` 之后；
+     *   ② **熔断态**：`EngineHost.installBreakerResumeWatch` 里。熔断态刻意什么都不初始化，
+     *      但「重新启用」这条命令**正是从这条通道来的** —— 不装就等于把自己锁死。
+     */
+    fun attachTransport(hostCtx: Context) {
+        cr = runCatching { hostCtx.applicationContext?.contentResolver ?: hostCtx.contentResolver }
+            .getOrNull()
+        loadMirrorFromSettings()
+        registerPushReceiver(hostCtx)
+
+        // 镜像还空着 ⇒ 手上没有可用配置。反向问一次：App 不一定在跑，
+        // 但它在收到之后会自己把整份配置补齐。
+        if (mirror.isNullOrEmpty() && !requestedOnce) {
+            requestedOnce = true
+            if (ConfigChannel.sendRequest(hostCtx)) {
+                Log.i(TAG, "本地镜像为空 → 已向 App 请求一次配置推送（${ConfigChannel.ACTION_REQUEST}）")
+            }
+        }
+    }
+
+    /**
+     * 从 `Settings.System`（[PrefsBridge.MIRROR]）把上次落盘的镜像读回来。
+     *
+     * ★ 它就是"引擎重启后不依赖 App 也能拿回配置"的全部实现。没有它，SystemUI 每被
+     *   杀一次、用户的设置就会看起来被打回默认。
+     */
+    private fun loadMirrorFromSettings() {
+        val c = cr ?: return
+        val raw = runCatching { PrefsBridge.readString(c, PrefsBridge.MIRROR) }.getOrNull()
+        if (raw.isNullOrEmpty()) return
+        val snap = ConfigChannel.decode(raw)
+        if (snap.isNullOrEmpty()) {
+            Log.w(TAG, "镜像解析失败或为空（长度 ${raw.length}）→ 先按「没有」处理")
+            return
+        }
+        mirror = snap
+        Log.i(TAG, "配置镜像已从系统设置读回（${snap.size} 个键）")
+    }
+
+    /**
+     * 收到 App 推来的**全量快照**。
+     *
+     * ★ 两条纪律：
+     *   ① **坏包 / 空包一律丢弃**，绝不拿去覆盖现有配置 —— 否则一次传输故障就会把用户的
+     *      配置悄悄打回默认（与 [advanceBaseline] 里"读空不打空基线"是同一条教训）；
+     *   ② **落盘失败不影响本次生效**：先更新内存、先通知订阅者，`Settings` 写失败只记日志。
+     *      理由：落盘是为"下次引擎重启"服务的，而"现在生效"是用户此刻就要看到的东西。
+     */
+    fun onConfigPushed(json: String) {
+        val snap = ConfigChannel.decode(json)
+        if (snap == null) {
+            Log.w(TAG, "配置推送解析失败（长度 ${json.length}）→ 丢弃")
+            return
+        }
+        if (snap.isEmpty()) {
+            Log.w(TAG, "配置推送是空的 → 丢弃（不用空配置覆盖引擎状态）")
+            return
+        }
+        val diff = changedKeys(mirror ?: emptyMap(), snap)
+        mirror = snap
+        val ok = cr?.let { PrefsBridge.writeString(it, PrefsBridge.MIRROR, json) } ?: false
+        Log.i(TAG, "收到 App 推送的配置（${snap.size} 个键，$diff；落盘=$ok）")
+        listeners.forEach { l -> runCatching { l() } }
+    }
+
+    /**
+     * 注册接收 App 推送的**动态**广播接收者。**幂等**。
+     *
+     * ★★ 两个参数都必须给对，少一个就有一个方向是坏的：
+     *
+     *   ① **`RECEIVER_EXPORTED`**（API 33+ 不带这个标志会直接抛）
+     *      —— 我们跑在 SystemUI 进程里、发送方是**另一个应用**，不导出就永远收不到；
+     *   ② **`broadcastPermission`** = [ConfigChannel.PERM_PUSH]（signature 级）
+     *      —— 导出意味着"任何应用都能往这个 action 上发"，所以必须配一条准入权限，
+     *      把它限死成"与 App 同签名的应用"，也就是只有 App 自己能发。
+     *
+     * ★ 鉴权为什么走**权限**而不是"在 `onReceive` 里核对发送方 uid"：
+     *   核对那条路要读发送方身份，而那组 API 在 `BroadcastReceiver` 上 **API 34 才有**
+     *   ⇒ Android 13 及以下只能退化成"谁都能发"（本工程 minSdk 30，那就是三个大版本敞着门）。
+     *   权限是 **AMS 在投递前**判的，不持有者连 `onReceive` 都进不来，且与系统版本无关。
+     *   ⚠️ 2026-10-03 先写的那版用了 `sendingUid`，那个属性**在 `BroadcastReceiver` 上不存在**，
+     *   编译期直接 `Unresolved reference` —— 别再往那个方向试。
+     *
+     * ★ 用 **5 参**重载 `registerReceiver(r, f, perm, scheduler, flags)`：它 **API 26** 就有，
+     *   本工程 minSdk 30 ⇒ **不需要按版本分支**。（API 26–32 上 `flags` 被忽略，
+     *   那个年代动态接收者本来就只有"导出"一种形态，行为不变。）
+     */
+    private fun registerPushReceiver(hostCtx: Context) {
+        if (pushReceiver != null) return
+        synchronized(this) {
+            if (pushReceiver != null) return
+
+            val r = object : BroadcastReceiver() {
+                override fun onReceive(c: Context?, i: Intent?) {
+                    if (i?.action != ConfigChannel.ACTION_PUSH) return
+                    val s = i.getStringExtra(ConfigChannel.EXTRA_SNAPSHOT) ?: return
+                    runCatching { onConfigPushed(s) }
+                        .onFailure { Log.w(TAG, "处理配置推送失败（已吞掉）", it) }
+                }
+            }
+
+            val f = IntentFilter(ConfigChannel.ACTION_PUSH)
+            runCatching {
+                hostCtx.registerReceiver(
+                    r, f, ConfigChannel.PERM_PUSH, null, Context.RECEIVER_EXPORTED,
+                )
+                pushReceiver = r
+                Log.i(
+                    TAG,
+                    "配置推送接收者已注册（${ConfigChannel.ACTION_PUSH}；" +
+                        "发送方须持 ${ConfigChannel.PERM_PUSH} ⇒ 仅同签名应用可发）",
+                )
+            }.onFailure { Log.w(TAG, "注册配置推送接收者失败 → 本次只能靠老链路", it) }
+        }
+    }
+
     /** 订阅配置变化（回调在本模块自建的线程/框架监控线程上，**不在** SystemUI 主线程） */
     fun subscribe(listener: () -> Unit) {
         listeners.addIfAbsent(listener)
@@ -220,20 +376,56 @@ internal object ModulePrefs {
     // 文件被删/被改坏时可能抛。这里一律退化成"用默认值"，绝不向上冒泡 ——
     // 调用方是 SystemUI 进程，任何未捕获异常都是状态栏级别的事故。
 
-    fun getString(key: String, def: String?): String? =
-        runCatching { xs?.getString(key, def) }.getOrDefault(def)
+    /**
+     * 取值：**镜像优先，老通道兜底**（优先级理由见 [mirror] 的注释）。
+     *
+     * ★ 镜像那条路**不强求类型一致**：JSON 回来的数字可能是 `Int` 也可能是 `Float`，
+     *   而调用方拿 `getInt` 去读一个 `Float`（或反过来）都是正常的 ⇒ 一律经 `Number` 转换。
+     *   ⛔ 别改成 `as Int` 那种硬转 —— 那会在"值恰好是浮点"时抛 `ClassCastException`，
+     *   而异常在 SystemUI 进程里是状态栏级别的事故。
+     *   老通道（`XSharedPreferences`）是强类型的，那条仍按它原本的规矩走。
+     */
+    private fun fromMirror(key: String): Any? = mirror?.get(key)
 
-    fun getInt(key: String, def: Int): Int =
-        runCatching { xs?.getInt(key, def) ?: def }.getOrDefault(def)
+    fun getString(key: String, def: String?): String? {
+        val m = fromMirror(key)
+        if (m != null) return m.toString()
+        return runCatching { xs?.getString(key, def) }.getOrDefault(def)
+    }
 
-    fun getFloat(key: String, def: Float): Float =
-        runCatching { xs?.getFloat(key, def) ?: def }.getOrDefault(def)
+    fun getInt(key: String, def: Int): Int {
+        when (val m = fromMirror(key)) {
+            is Number -> return m.toInt()
+            is String -> return m.toIntOrNull() ?: def
+            is Boolean -> return if (m) 1 else 0
+            else -> Unit
+        }
+        return runCatching { xs?.getInt(key, def) ?: def }.getOrDefault(def)
+    }
 
-    fun getBoolean(key: String, def: Boolean): Boolean =
-        runCatching { xs?.getBoolean(key, def) ?: def }.getOrDefault(def)
+    fun getFloat(key: String, def: Float): Float {
+        when (val m = fromMirror(key)) {
+            is Number -> return m.toFloat()
+            is String -> return m.toFloatOrNull() ?: def
+            else -> Unit
+        }
+        return runCatching { xs?.getFloat(key, def) ?: def }.getOrDefault(def)
+    }
 
-    fun contains(key: String): Boolean =
-        runCatching { xs?.contains(key) == true }.getOrDefault(false)
+    fun getBoolean(key: String, def: Boolean): Boolean {
+        when (val m = fromMirror(key)) {
+            is Boolean -> return m
+            is String -> return m.toBooleanStrictOrNull() ?: def
+            is Number -> return m.toInt() != 0
+            else -> Unit
+        }
+        return runCatching { xs?.getBoolean(key, def) ?: def }.getOrDefault(def)
+    }
+
+    fun contains(key: String): Boolean {
+        if (mirror?.containsKey(key) == true) return true
+        return runCatching { xs?.contains(key) == true }.getOrDefault(false)
+    }
 
     /**
      * 全量重读。改配置后由订阅者自行调用一次（框架回调里已经调过，这里是给

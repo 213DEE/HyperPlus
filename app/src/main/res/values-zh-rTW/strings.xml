@@ -162,6 +162,12 @@
     <string name="phase_starting">正在啟動</string>
     <string name="phase_stopped">已停止</string>
     <string name="phase_failed">啟動失敗</string>
+    <!-- 啟動熔斷：連續失敗到閾值後不再自動啟動，等使用者在「目前狀態」頁點按鈕 -->
+    <string name="phase_halted">已暫停</string>
+    <string name="status_halted_headline">旋轉服務已暫停</string>
+    <string name="status_halted_note">連續 %1$d 次啟動失敗，已停止自動啟動，以免系統介面反覆重啟。問題解決後，點下面重新啟用。</string>
+    <string name="status_halted_failed">還沒恢復。確認問題已解決的話，重啟手機後再試一次。</string>
+    <string name="status_halted_reset">重新啟用</string>
 
     <!-- ================================================ 「目前狀態」頁讀數 -->
     <string name="ro_phase">執行狀態：%1$s</string>

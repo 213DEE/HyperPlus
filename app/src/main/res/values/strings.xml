@@ -178,6 +178,12 @@
     <string name="phase_starting">Starting</string>
     <string name="phase_stopped">Stopped</string>
     <string name="phase_failed">Failed to start</string>
+    <!-- 启动熔断：连续失败到阈值后不再自动启动，等用户在「当前状态」页点按钮 -->
+    <string name="phase_halted">Paused</string>
+    <string name="status_halted_headline">Rotation service paused</string>
+    <string name="status_halted_note">Startup failed %1$d times in a row, so automatic startup is off to keep the system UI from restarting over and over. If the problem is fixed, tap below to enable it again.</string>
+    <string name="status_halted_failed">Not recovered yet. If you are sure it is fixed, restart the device and try again.</string>
+    <string name="status_halted_reset">Enable again</string>
 
     <!-- ================================================ 「当前状态」页读数 -->
     <string name="ro_phase">Runtime: %1$s</string>

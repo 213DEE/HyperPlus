@@ -28,6 +28,29 @@
     -->
     <uses-sdk tools:overrideLibrary="top.yukonga.miuix.kmp.blur" />
 
+    <!--
+      ★★ 配置推送的**准入权限**（2026-10-03）—— 引擎侧动态接收者靠它把发送方限死。
+
+      为什么需要：那颗接收者住在 SystemUI 进程里（见 module/ModulePrefs.registerPushReceiver），
+      发送方是另一个应用 ⇒ 必须 `RECEIVER_EXPORTED`，否则收不到；而"导出"的字面含义就是
+      "任何应用都能往这个 action 上发"。没有准入，随便一个 App 就能改本模块的旋转配置。
+
+      为什么是 `signature` 而不是"在 onReceive 里核对发送方 uid"：
+      核对要读发送方身份，而那组 API（`BroadcastReceiver.getSentFromUid` 等）**要 API 34 才有**
+      ⇒ Android 13 及以下只能退化成"谁都能发"，而本工程 minSdk 是 30。
+      `signature` 级权限的语义是"与**声明方**（就是我们自己）同签名才授予" ⇒
+      等价于**只有本应用能发**，而且由 AMS 在投递之前判，不持有者连 onReceive 都进不来，
+      **与系统版本无关**。
+
+      ⚠️ 声明方必须与本 App 同签名 —— 这是自用/私有发布，不存在"换签名后旧模块失联"的顾虑；
+         但若将来改用别的签名分发，**引擎侧那条推送会静默收不到**（AMS 直接跳过接收者，无异常）。
+      ⚠️ root / shell 由平台的 uid 特例放行，所以 `adb shell su -c "am broadcast ..."` 仍可用来验证。
+    -->
+    <permission
+        android:name="cn.dsr213.hyperplus.permission.CONFIG_PUSH"
+        android:protectionLevel="signature" />
+    <uses-permission android:name="cn.dsr213.hyperplus.permission.CONFIG_PUSH" />
+
     <uses-permission android:name="android.permission.CAMERA" />
     <!--
       ★ 半自动悬浮按钮提层级用（2026-09-28 用户点名「悬浮窗层级太低，旋转 180° 后被状态栏遮挡」）。
@@ -144,6 +167,13 @@
           这里再写一遍是**把意图写在明面上**：将来谁把 xposedminversion 降回 92，
           配置通道不会跟着悄悄失效。
 
+          ⛔ **2026-10-03 更正：这两个声明现在是"不能动"的** —— `xposedminversion > 92`
+          与 `xposedsharedprefs` 共用同一个门（`||`）。把它们一起关掉确实能消掉 LSPosed 的
+          废弃警告，但**配置通道会当场断**：那两个 hook（`checkMode` / `getPreferencesDir`）
+          就装在这个判据分支里面。
+          详见 docs/配置通道_nsp废弃警告_2026-10-03.md §2.4。
+          ⇒ **要消警告必须先换通道；在那之前保持原样。**
+
           ⚠️ 它生效的前提是**本应用进程也要被注入** —— 但这件事**不需要用户做**，
           也**做不到**（2026-10-03 更正，此前 README / 文档 / 界面文案里
           「作用域里要勾 HyperPlus 自己」是错的，被抄了十几处）：
@@ -196,6 +226,29 @@
                 <action android:name="android.service.quicksettings.action.QS_TILE" />
             </intent-filter>
         </service>
+
+        <!-- ===================== 配置下行的**反向**那条腿（2026-10-03） =====================
+             引擎（住在 SystemUI 里）启动时若发现自己那份配置镜像还是空的，就发一条
+             `cn.dsr213.hyperplus.action.CONFIG_REQUEST` 过来，这个接收者把 App 叫起来、
+             让它把整份配置用广播推回去（见 ConfigRequestReceiver / ConfigChannel 的注释）。
+
+             ★ 为什么必须是**清单**接收者：动态注册的那种只有 App 进程活着才存在，
+               而"需要它"的场景恰恰是 App 没在跑的时候。
+
+             ⚠️ `exported="true"` 是必需的（引擎是另一个应用，包名不同）。
+              安全边界：它能做的事只有"让本应用把自己的配置推给系统界面" ——
+              没有任何读写、没有敏感数据外泄，被别的应用误触也无副作用。
+              真正需要防的是**反方向**（别人往引擎里灌配置），那条靠上面声明的那条
+              `signature` 级权限 `cn.dsr213.hyperplus.permission.CONFIG_PUSH` 拦掉 ——
+              引擎侧注册接收者时要求它，AMS 在投递前就跳过非同签名的发送方，
+              见 `module/ModulePrefs.registerPushReceiver`。 -->
+        <receiver
+            android:name=".ConfigRequestReceiver"
+            android:exported="true">
+            <intent-filter>
+                <action android:name="cn.dsr213.hyperplus.action.CONFIG_REQUEST" />
+            </intent-filter>
+        </receiver>
 
     </application>
 

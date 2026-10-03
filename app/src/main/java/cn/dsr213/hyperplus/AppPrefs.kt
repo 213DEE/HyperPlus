@@ -3,6 +3,8 @@ package cn.dsr213.hyperplus
 import android.content.ContentResolver
 import android.content.Context
 import android.content.SharedPreferences
+import android.os.Handler
+import android.os.Looper
 import android.provider.Settings
 import android.util.Log
 import android.util.Xml
@@ -226,6 +228,15 @@ enum class CaptureStrategy {
 object AppPrefs {
 
     private const val TAG = "HyperPlusPrefs"
+
+    /**
+     * 配置推送的**防抖窗口**（2026-10-03 新增，广播通道）。
+     *
+     * ★ 为什么要防抖：一次界面操作常常连着写好几个键（例如切模式 = 模式 + 整组落盘），
+     *   每个键各发一条广播是浪费，引擎那边每次还得跑一遍全量比对。
+     *   200ms 足够把同一批写入合并成一条，体感上仍然是"立刻生效"。
+     */
+    private const val CONFIG_PUSH_DEBOUNCE_MS = 200L
 
     /** 配置文件名。⚠️ 必须与 [cn.dsr213.hyperplus.module.ModulePrefs.PREFS_NAME] 一字不差 */
     const val NAME = "facerotate_prefs"
@@ -620,6 +631,27 @@ object AppPrefs {
     @Volatile
     private var prefs: SharedPreferences? = null
 
+    // ------------------------------------------------------------ 配置推送（广播通道，2026-10-03）
+
+    /**
+     * 挂在 [prefs] 上的变更监听器。
+     *
+     * ⚠️⚠️ **必须留一个强引用**：`SharedPreferencesImpl` 内部是用 `WeakHashMap` 存监听器的
+     *   ⇒ 只用 lambda 注册、不持有引用的话，它随时会被 GC 掉；之后"改配置就再也不推了"，
+     *   而且**没有任何报错**（最坏的一种失败：静默）。
+     */
+    private var prefsChangeListener: SharedPreferences.OnSharedPreferenceChangeListener? = null
+
+    /** 防抖是否已排程（回调来自框架主线程，见 [scheduleConfigPush]） */
+    @Volatile private var pushScheduled = false
+
+    private val pushHandler by lazy { Handler(Looper.getMainLooper()) }
+
+    private val pushRunnable = Runnable {
+        pushScheduled = false
+        pushConfigNow()
+    }
+
     /** 本进程是否引擎宿主（SystemUI） */
     @Volatile
     private var hostMode = false
@@ -681,6 +713,22 @@ object AppPrefs {
 
             val p = opened ?: app.getSharedPreferences(NAME, Context.MODE_PRIVATE)
             prefs = p
+
+            // ★★ 广播通道的挂钩点（2026-10-03）：**一处监听覆盖所有写入**。
+            //   改配置的地方有十几处（每个 setter 各自 `edit().apply()`），逐个补"顺手推一次"
+            //   必然漏 ⇒ 用 prefs 自己的变更回调，一次注册全部覆盖。
+            //   ⚠️ 回调固定由框架在主线程派发（`SharedPreferencesImpl` 的通知走主线程 Handler），
+            //     而且**只在"值真的变了"时才回调** —— 所以启动时还要再无条件推一次，
+            //     见本函数末尾（引擎可能在 App 上次退出之后才重启，它的镜像会缺）。
+            //   ⚠️ 必须留强引用，理由见 [prefsChangeListener]。
+            runCatching {
+                val l = SharedPreferences.OnSharedPreferenceChangeListener { _, _ -> scheduleConfigPush() }
+                p.registerOnSharedPreferenceChangeListener(l)
+                prefsChangeListener = l
+            }.onFailure {
+                Log.w(TAG, "注册配置变更监听失败（配置仍会写盘，只是不会主动推给引擎）", it)
+            }
+
             migrateLegacyIfNeeded(app, p)
             reloadFromPrefs()
             // ★ 顺序不能变：**先**读盘拿到两份模式，**再**量形态 —— 因为"生效模式"是
@@ -692,6 +740,45 @@ object AppPrefs {
         //   SharedPreferences 只在**首次写入**时才创建文件。用户可能只是打开看一眼、
         //   什么都不改 —— 那样文件压根不存在，引擎那边读到的就是"不可读"。
         persistAll()
+
+        // ★★ 再**无条件推一次**（2026-10-03 广播通道）：上面那条变更监听只在"值真的变了"
+        //   时才回调，而这里恰恰是"值没变、但引擎需要一份"的典型场景 ——
+        //   引擎可能在 App 上次退出之后才起来（SystemUI 被重启 / 刚装机 / 刚升级），
+        //   它那份 `Settings` 镜像还是空的。启动时推一次，免去"要用户去动个开关才生效"。
+        pushConfigNow()
+    }
+
+    /**
+     * 排一次防抖推送（窗口见 [CONFIG_PUSH_DEBOUNCE_MS]）。
+     *
+     * ⚠️ 回调来自框架主线程，`pushScheduled` 基本只在主线程读写；留 `@Volatile`
+     *   只为防御 [init] 被后台线程调用那条路径（最坏后果是多推一条广播，无害）。
+     */
+    private fun scheduleConfigPush() {
+        if (pushScheduled) return
+        pushScheduled = true
+        pushHandler.postDelayed(pushRunnable, CONFIG_PUSH_DEBOUNCE_MS)
+    }
+
+    /**
+     * 立刻把**当前整份配置**推给引擎。
+     *
+     * ★ 推的是**全量快照**，不是"改了哪个键"：与引擎侧订阅者的判据一致（它们比的都是整体
+     *   快照），而且请求类键（标定 / 预览按钮 / 清除名单 / 熔断复位）本来就是"值变了一个新高"
+     *   驱动的 —— 全量快照天然把这件事说清楚，不需要额外协议。详见 [ConfigChannel] 的类注释。
+     *
+     * ⚠️ 广播**没有回执** ⇒ 这里只能报告"发出去了"，⛔ 不能对界面说"引擎已收到"。
+     *   真正的确认来自引擎回报的状态串（`phase=` / `cfgd=`）。
+     */
+    internal fun pushConfigNow() {
+        val c = ctx ?: return
+        val p = prefs ?: return
+        val snap = ConfigChannel.snapshotOf(p)
+        // 空快照不发：只会让引擎那边多一条"空包已丢弃"的日志，没有信息量。
+        if (snap.isEmpty()) return
+        if (ConfigChannel.sendPush(c, snap)) {
+            Log.i(TAG, "已推送配置快照（${snap.size} 个键）")
+        }
     }
 
     /** 把内存里的配置整体写成一次提交（幂等；同时负责把文件"具现"出来） */
@@ -1264,6 +1351,35 @@ object AppPrefs {
         RotateMode.SYSTEM -> RotateMode.ADAPTIVE
         RotateMode.ADAPTIVE -> RotateMode.SEMI
         RotateMode.SEMI -> RotateMode.SYSTEM
+    }
+
+    // ================================================================ 熔断复位（App → 引擎）
+
+    /**
+     * ★★★ 请求「重新启用」旋转服务 —— **启动熔断的唯一出口**（2026-10-03）。
+     *
+     * 熔断（`phase=halted`）意味着引擎**已经不再自动启动**：那是为了打断
+     * 「装完就崩、系统界面反复重启」的死循环（判据见 `EngineTuning.BOOT_BREAKER_THRESHOLD`）。
+     *
+     * ★ 两件事**同时**做，任意一条通了用户就能恢复（理由见 [PrefsBridge.BOOT_ATTEMPTS]）：
+     *   ① 往自己的 prefs 写一个新时间戳（[PrefsBridge.BREAKER_RESET]）—— **零权限**。
+     *      熔断态下引擎仍然只监听这一个键（那条链路极轻，见 `EngineHost.installBreakerResumeWatch`），
+     *      收到就会当场清零并重试启动 ⇒ 用户**不用等重启**，几秒内就该看到状态变化。
+     *   ② 借 root 直接把计数键写 0（[RootShell]）—— 兜住"配置通道也坏了"的双故障：
+     *      那种情况下 ① 根本送不到引擎，没有 ② 就等于**永久锁死**。
+     *      ⚠️ 这是**用户明确点了这个按钮**才发生的，符合 [RootShell] 那条
+     *      「只在为用户点击服务时调用」的纪律；没授权 root 时它只是返回 false，不影响 ①。
+     *
+     * @return true = root 直写这一路成功了（仅用于日志/诊断；界面上不拿它判断成败 ——
+     *   真正的判据是"状态串里的 phase 有没有离开 halted"）
+     */
+    suspend fun requestBreakerReset(): Boolean {
+        val token = System.currentTimeMillis().toString()
+        prefs?.edit()?.putString(PrefsBridge.BREAKER_RESET, token)?.apply()
+        Log.i(TAG, "熔断复位：请求已落盘（$token）")
+        val byRoot = RootShell.putSystemInt(PrefsBridge.BOOT_ATTEMPTS, 0)
+        Log.i(TAG, "熔断复位：root 直写计数键 = $byRoot")
+        return byRoot
     }
 
     // ================================================================ 标定请求（App → 引擎）

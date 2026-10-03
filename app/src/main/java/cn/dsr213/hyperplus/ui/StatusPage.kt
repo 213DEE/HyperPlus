@@ -1,17 +1,29 @@
 package cn.dsr213.hyperplus.ui
 
+import androidx.compose.foundation.layout.fillMaxWidth
+import androidx.compose.foundation.layout.padding
 import androidx.compose.runtime.Composable
+import androidx.compose.runtime.LaunchedEffect
 import androidx.compose.runtime.collectAsState
 import androidx.compose.runtime.getValue
+import androidx.compose.runtime.mutableStateOf
+import androidx.compose.runtime.remember
+import androidx.compose.runtime.rememberCoroutineScope
+import androidx.compose.runtime.setValue
+import androidx.compose.ui.Modifier
 import androidx.compose.ui.platform.LocalContext
 import androidx.compose.ui.res.stringResource
 import androidx.compose.ui.text.font.FontWeight
+import androidx.compose.ui.unit.dp
 import androidx.compose.ui.unit.sp
 import cn.dsr213.hyperplus.AppPrefs
 import cn.dsr213.hyperplus.ModuleLink
 import cn.dsr213.hyperplus.R
 import cn.dsr213.hyperplus.RotateMode
+import kotlinx.coroutines.delay
+import kotlinx.coroutines.launch
 import top.yukonga.miuix.kmp.basic.Text
+import top.yukonga.miuix.kmp.basic.TextButton
 import top.yukonga.miuix.kmp.theme.MiuixTheme
 
 /**
@@ -52,6 +64,27 @@ internal fun StatusPage(
     val form by AppPrefs.screenForm.collectAsState()
     val ctx = LocalContext.current
 
+    // ------------------------------------------------------------ 熔断态的「重新启用」（2026-10-03）
+    //
+    // ★ 为什么这里是本页唯一带"动作"的地方：熔断是**唯一**一个需要用户动手才能离开的状态
+    //   （其余取值要么自愈、要么等系统重启）。所以这张卡必须给出动作，不能只说现象。
+    //
+    // ⚠️ `resetting` 期间按钮要挡住连点 —— 底下的复位会去起一个 `su` 进程
+    //   （见 `AppPrefs.requestBreakerReset`），连点会同时起好几个。
+    // ⚠️ 6 秒后若**这张卡还在渲染**，说明 phase 仍是 halted ⇒ 如实说"还没恢复"。
+    //   真恢复了的话本页会切到"运行中"分支、这个 Composable 被整个丢弃，
+    //   下面的计时随协程一起取消 ⇒ **不会**闪出一句假的失败。
+    var resetting by remember { mutableStateOf(false) }
+    var resetFailed by remember { mutableStateOf(false) }
+    val scope = rememberCoroutineScope()
+    LaunchedEffect(resetting) {
+        if (resetting) {
+            delay(RESET_WAIT_MS)
+            resetting = false
+            resetFailed = true
+        }
+    }
+
     SubPage(title = stringResource(R.string.status_title), onBack = onBack) {
         TextCard {
             when {
@@ -67,6 +100,34 @@ internal fun StatusPage(
                     // ⚠️ 这句是**排障必需**（它告诉用户去哪儿修），别当废话删掉。
                     // ⚠️ 2026-10-02 精简："系统模块"→"模块"、"本应用"去掉 —— 主语越少越好读。
                     Note(stringResource(R.string.status_no_report))
+                }
+
+                // ★★★ 启动熔断（2026-10-03）：引擎**自己停下来了**，而且不会再自动起来。
+                //   ⚠️ 必须排在 `!hosted` **之前** —— 熔断态没有心跳（心跳循环压根没启动），
+                //     会先被 `!hosted` 吃掉，用户看到的就成了「旋转服务已离线」＋
+                //     「可能没启用 / 没勾作用域」。**那是错的指引**：真因是连续启动失败，
+                //     唯一的动作是点下面这个按钮。
+                //   ⚠️ 文案纪律：讲现象与后果、只讲"我该怎么办"，⛔ 不讲机制、⛔ 不写 markdown 星号。
+                hs.phase == PHASE_HALTED -> {
+                    val headline = stringResource(R.string.status_halted_headline)
+                    val note = stringResource(R.string.status_halted_note, hs.breakerAttempts)
+                    val failNote = stringResource(R.string.status_halted_failed)
+                    val resetLabel = stringResource(R.string.status_halted_reset)
+                    StatusHeadline(headline)
+                    Note(note)
+                    if (resetFailed) Note(failNote)
+                    TextButton(
+                        text = resetLabel,
+                        onClick = {
+                            if (!resetting) {
+                                resetting = true
+                                resetFailed = false
+                                // ⚠️ 复位里会起一个 su（可能弹一次授权框）⇒ 不能占主线程
+                                scope.launch { AppPrefs.requestBreakerReset() }
+                            }
+                        },
+                        modifier = Modifier.fillMaxWidth().padding(top = 8.dp),
+                    )
                 }
 
                 !hosted -> {
@@ -130,6 +191,22 @@ internal fun StatusPage(
         //     **这一页只回答「现在能不能用」，排障读数全部住「诊断」。**
     }
 }
+
+/**
+ * 熔断态的 `phase` 取值（引擎侧写作 `phase=halted`，见 `EngineHost.publishHalted`）。
+ * ⚠️ 与 `UiCommon.phaseText` 里那个分支是**同一个字面量**，改一处必须改两处。
+ */
+private const val PHASE_HALTED = "halted"
+
+/**
+ * 点「重新启用」之后等多久才判"没恢复"（ms）。
+ *
+ * ★ 取值依据：链路是「App 写 prefs → 引擎（**最多 2 秒**的内容轮询）察觉 → 清零 →
+ *   重跑启动」。而启动本身还要走 native 库 + ML Kit + CameraX，实测几秒。
+ *   6 秒把这一串包得住，又短到用户还愿意等在那张卡上。
+ * ⚠️ 判据是"这张卡还在不在"，不是"读一次设置" —— 见函数里的注释。
+ */
+private const val RESET_WAIT_MS = 6_000L
 
 /**
  * 状态大字标题（与 HyperOS 设置页里"标题行"的字重一致）。

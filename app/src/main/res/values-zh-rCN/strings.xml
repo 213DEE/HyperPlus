@@ -166,6 +166,12 @@
     <string name="phase_starting">正在启动</string>
     <string name="phase_stopped">已停止</string>
     <string name="phase_failed">启动失败</string>
+    <!-- 启动熔断：连续失败到阈值后不再自动启动，等用户在「当前状态」页点按钮 -->
+    <string name="phase_halted">已暂停</string>
+    <string name="status_halted_headline">旋转服务已暂停</string>
+    <string name="status_halted_note">连续 %1$d 次启动失败，已停止自动启动，以免系统界面反复重启。问题解决后，点下面重新启用。</string>
+    <string name="status_halted_failed">还没有恢复。确认问题已解决的话，重启手机后再试一次。</string>
+    <string name="status_halted_reset">重新启用</string>
 
     <!-- ================================================ 「当前状态」页读数 -->
     <string name="ro_phase">运行状态：%1$s</string>

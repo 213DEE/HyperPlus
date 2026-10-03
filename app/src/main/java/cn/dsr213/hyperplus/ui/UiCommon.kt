@@ -510,6 +510,10 @@ internal fun phaseText(ctx: Context, raw: String): String = when (raw) {
     "starting" -> ctx.getString(R.string.phase_starting)
     "stopped" -> ctx.getString(R.string.phase_stopped)
     "failed" -> ctx.getString(R.string.phase_failed)
+    // ★ 2026-10-03 新增：启动熔断（连续失败到阈值后不再自动启动）。
+    //   ⚠️ 它是**唯一**一个"需要用户动手才能恢复"的取值 —— 所以「当前状态」页
+    //     会为它单开一个分支（带「重新启用」按钮），不能只靠这一句词。
+    "halted" -> ctx.getString(R.string.phase_halted)
     else -> raw
 }
 

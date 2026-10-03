@@ -82,6 +82,23 @@ android {
             useLegacyPackaging = true
         }
     }
+
+    testOptions {
+        // ★ 让 `android.jar` 的方法在单测里**返回默认值**，而不是抛 "not mocked"。
+        //
+        //   加它的**唯一**理由：`ModuleLink.parse` 里要用 `SystemClock.elapsedRealtime()`
+        //   算"心跳距今多少秒"，而那个方法是**跨进程契约**的一部分 ——
+        //   启动熔断的判据就挂在同一个解析函数上（见 `BootBreakerTest`）。
+        //   不在单测里把它钉住，就只能靠真机复现"引擎自己停下来了"这一种状态，
+        //   而那正是最难复现的场景。
+        //
+        //   ⚠️ 本工程其余单测全是纯逻辑，加这一条对它们**没有任何影响**；
+        //     它的副作用只是"本该抛异常的 Android 调用会静默返回 0/null"，
+        //     所以别用它来掩盖"单测里误用了真 Android API"。
+        unitTests {
+            isReturnDefaultValues = true
+        }
+    }
 }
 
 // Kotlin 2.4 已移除 kotlinOptions，统一走 compilerOptions

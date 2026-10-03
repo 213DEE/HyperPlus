@@ -10,9 +10,12 @@ import android.provider.Settings
 import android.util.Log
 import cn.dsr213.hyperplus.AdaptiveEngine
 import cn.dsr213.hyperplus.AppPrefs
+import cn.dsr213.hyperplus.BOOT_BREAKER_THRESHOLD
+import cn.dsr213.hyperplus.BOOT_HEALTHY_WINDOW_MS
 import cn.dsr213.hyperplus.EngineErrors
 import cn.dsr213.hyperplus.PrefsBridge
 import cn.dsr213.hyperplus.RotateMode
+import cn.dsr213.hyperplus.bootBreakerTripped
 import kotlinx.coroutines.CoroutineScope
 import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.SupervisorJob
@@ -65,6 +68,22 @@ internal object EngineHost {
 
     @Volatile private var bootThread: HandlerThread? = null
 
+    // ---------------------------------------------------------------- 熔断相关（2026-10-03）
+
+    /**
+     * 熔断态下"重新启用"要用到的启动参数。
+     *
+     * ★ 为什么存下来：熔断分支是在 [start] 的入口返回的，而"用户点了重新启用"
+     *   可能在几分钟之后才来 —— 那时候只能靠这里留着的一份参数把 [start] 再喊一次。
+     * ⚠️ 只存引用，不额外持有任何资源；SystemUI 进程本身就是常驻的。
+     */
+    @Volatile private var resumeHostCtx: Context? = null
+    @Volatile private var resumeAppCtx: Context? = null
+    @Volatile private var resumeClassLoader: ClassLoader? = null
+
+    /** [installBreakerResumeWatch] 的幂等闸（同一进程里只装一次） */
+    @Volatile private var breakerWatchInstalled = false
+
     /**
      * 本引擎的启动时刻（`elapsedRealtime`，毫秒）。
      *
@@ -92,12 +111,37 @@ internal object EngineHost {
      * 顺序**不可调换**（理由见 [HostEnv] 的类注释）：
      *   ① 预加载 native so → ② 初始化 MlKitContext → ③ 配置后端切到镜像
      *   → ④（主线程）造 lifecycle + 引擎 + start
+     *
+     * ★★ 2026-10-03 起，进门前先过**启动熔断闸**（见 [BOOT_BREAKER_THRESHOLD]）：
+     *   连续失败到阈值就不再启动，只上报 `phase=halted` 并等用户点「重新启用」。
+     *   闸放在**置 [starting] 之前** —— 否则熔断分支返回时 `starting` 会永远停在 true，
+     *   后面那条恢复路径就再也进不来了（这个是坑，别动顺序）。
      */
     fun start(hostCtx: Context, appCtx: Context?, classLoader: ClassLoader?) {
         if (starting || engine != null || dead) {
             Log.i(TAG, "引擎已启动 / 正在启动 / 已停用，跳过（starting=$starting engine=${engine != null} dead=$dead）")
             return
         }
+
+        // 留一份启动参数：熔断期间用户点「重新启用」时要靠它把本方法再喊一次。
+        resumeHostCtx = hostCtx
+        resumeAppCtx = appCtx
+        resumeClassLoader = classLoader
+
+        // ★★★ 熔断闸。它读的是**落盘**的计数（不是内存里的 [dead]）——
+        //   故障是确定性的那种情况下，内存标志会随进程一起复位，等于没有这道闸。
+        val attempts = PrefsBridge.readInt(hostCtx.contentResolver, PrefsBridge.BOOT_ATTEMPTS, 0)
+        if (bootBreakerTripped(attempts)) {
+            Log.w(
+                TAG,
+                "⛔ 启动熔断已生效（连续失败 $attempts 次 ≥ $BOOT_BREAKER_THRESHOLD）" +
+                    "—— 本次不再启动引擎，以免系统界面继续反复重启",
+            )
+            publishHalted(hostCtx, attempts)
+            installBreakerResumeWatch()
+            return
+        }
+
         starting = true
 
         val t = HandlerThread("hyperplus-engine-boot").apply { start() }
@@ -113,6 +157,19 @@ internal object EngineHost {
     }
 
     private fun bootOn(hostCtx: Context, appCtx: Context?, classLoader: ClassLoader?) {
+        // ★★ 熔断记账（2026-10-03）：走到这里说明**这次真的要动手了** ⇒ 先 +1。
+        //   清零由 [installLivenessTick] 里的"健康窗口"负责 —— 两份代码合起来表达
+        //   "这次启动最终活下来了吗"，且**跨进程存活**（写 Settings，不写内存）。
+        val cr = hostCtx.contentResolver
+        runCatching {
+            val before = PrefsBridge.readInt(cr, PrefsBridge.BOOT_ATTEMPTS, 0)
+            PrefsBridge.writeInt(cr, PrefsBridge.BOOT_ATTEMPTS, before + 1)
+            Log.i(
+                TAG,
+                "启动计数 ${before + 1}（健康运行 ${BOOT_HEALTHY_WINDOW_MS / 1000} 秒后清零）",
+            )
+        }.onFailure { Log.w(TAG, "启动计数写失败（不影响本次启动）", it) }
+
         // ① + ② ML Kit 的宿主环境（必须在任何 ML Kit 类被触碰之前）
         val notes = runCatching { HostEnv.prepare(hostCtx, appCtx, classLoader) }
             .getOrElse { listOf("❌ 宿主环境准备异常：${it.javaClass.simpleName}: ${it.message}") }
@@ -120,6 +177,13 @@ internal object EngineHost {
 
         // ③ 配置后端 = 跨进程镜像（读 App 改的值，实时跟随）
         AppPrefs.initHost(hostCtx)
+
+        // ★★ ③.5 配置**广播通道**（2026-10-03 新增）：注册接收者 + 把 `Settings` 里的镜像
+        //   读回来 + 必要时反向问 App 要一份。
+        //   ⚠️ 必须在 `installConfigWatcher` **之前** —— 订阅者是在那儿挂上的，
+        //   先有数据源再挂订阅者，免得刚起来那一条推送白丢（用户改了没生效最难查）。
+        runCatching { ModulePrefs.attachTransport(hostCtx) }
+            .onFailure { Log.w(TAG, "装配配置广播通道失败（退化为只靠老链路）", it) }
 
         // ④ 主线程：lifecycle 与 LifecycleRegistry 都有 checkMainThread()
         Handler(Looper.getMainLooper()).post {
@@ -360,12 +424,117 @@ internal object EngineHost {
                 delay(HEARTBEAT_PERIOD_MS)
             }
         }
+
+        // ★★★ 健康窗口（2026-10-03）：连续活过这么久 ⇒ 把**启动熔断计数清零**。
+        //
+        //   它与 `bootOn` 里那句 +1 是**一对**，合起来回答一个问题：
+        //   "这次启动最终活下来了吗"。判据刻意做成"**代码跑到这里才算活下来**"——
+        //   进程在窗口内死掉的话，这段协程根本不会被执行到，
+        //   计数留在盘上，下一次启动接着累加 ⇒ 确定性的坏启动会在阈值处被拦下。
+        //
+        //   ⚠️ 本方法**只在启动成功那条分支**被调用（见 [bootOn]），
+        //     所以"没起来"的路径天然不会清零，不需要额外判断。
+        //   ⚠️ `dead` 要判：引擎在窗口内被 [panic] 停掉时不该下调计数 ——
+        //     那也是一次"没活下来"。
+        scope.launch {
+            delay(BOOT_HEALTHY_WINDOW_MS)
+            if (dead) {
+                Log.i(TAG, "健康窗口到点，但引擎已被停用 ⇒ 保留启动计数（不下调）")
+                return@launch
+            }
+            val ok = PrefsBridge.writeInt(cr, PrefsBridge.BOOT_ATTEMPTS, 0)
+            Log.i(TAG, "引擎健康运行 ${BOOT_HEALTHY_WINDOW_MS / 1000} 秒 ⇒ 启动计数清零（$ok）")
+        }
     }
 
     private fun publishPhase(hostCtx: Context, phase: String) {
         runCatching {
             PrefsBridge.writeString(hostCtx.contentResolver, PrefsBridge.STATE, "v1|phase=$phase")
         }
+    }
+
+    // ================================================================ 熔断（2026-10-03）
+
+    /**
+     * 熔断态上报：`v1|phase=halted|attempts=N`。
+     *
+     * ★ 复用**既有**的状态串形状，所以跨进程契约不用改版本号：
+     *   App 侧 [cn.dsr213.hyperplus.ModuleLink.parse] 把 `phase` 当字符串读、
+     *   认不出来的取值**原样显示**，不认识的新字段直接忽略。
+     *   `attempts` 是**只追加**的字段（App 读它来显示"连续失败几次"）。
+     *
+     * ⚠️ 熔断态**没有心跳**（心跳循环根本没启动）⇒ App 侧会把它判成"离线"。
+     *   这正是为什么 App 那边要专门认 `phase=halted`：否则用户只会看到
+     *   「旋转服务已离线」这种没有可操作性的说法，而真正该做的是点「重新启用」。
+     */
+    private fun publishHalted(hostCtx: Context, attempts: Int) {
+        runCatching {
+            PrefsBridge.writeString(
+                hostCtx.contentResolver,
+                PrefsBridge.STATE,
+                "v1|phase=halted|attempts=$attempts",
+            )
+        }.onFailure { Log.w(TAG, "熔断态上报失败", it) }
+    }
+
+    /**
+     * 熔断态的**唯一出口**：等用户在 App 里点「重新启用」。
+     *
+     * 链路：App 往自己的 prefs 写一个新时间戳（[PrefsBridge.BREAKER_RESET]）
+     * → 这里读到"值变了" → 清掉计数 → 把 [start] 再喊一次。
+     *
+     * ★ 为什么熔断态还允许跑这一小段：它是本模块里**最轻**的一环 ——
+     *   读一个小文件 + 2 秒比对一次内容。**不碰** native 库、**不开**相机、
+     *   **不写** `Settings`（清零那次除外）。与真正会崩的启动序列（`HostEnv.prepare` /
+     *   CameraX / ML Kit）完全没有交集，所以它不会把我们刚停下来又拽回故障里。
+     *
+     * ⚠️ 配置通道不可用时要**如实报出来**（`diag`）—— 那种情况下这条路是死的，
+     *   用户只能走 App 里那个借 root 写键的兜底（见 [PrefsBridge.BOOT_ATTEMPTS] 的注释）。
+     */
+    private fun installBreakerResumeWatch() {
+        if (breakerWatchInstalled) return
+        breakerWatchInstalled = true
+
+        // ★ 必须先自己把配置文件读起来：正常路径上这一步由 AppPrefs.initHost 做，
+        //   而熔断分支**没有**走那条路（它刻意什么都不初始化）。
+        // ★★ 2026-10-03 追加：还要**把广播通道也装上** —— 「重新启用」这条命令现在正是从
+        //   那条通道来的，不装就等于在熔断态把自己锁死（只剩 root / adb 两个兜底）。
+        resumeHostCtx?.let { h ->
+            runCatching { ModulePrefs.attachTransport(h) }
+                .onFailure { Log.w(TAG, "熔断态：装配配置广播通道失败", it) }
+        }
+        val p = runCatching { ModulePrefs.open() }.getOrNull()
+        // ⚠️ 只有「老链路的 XSharedPreferences 拿不到」**且**「广播镜像也没有」才算真不可用。
+        //   只看 `p == null` 会在"广播通道已经通了、老链路还没拆"的过渡期误判成通道全断。
+        if (p == null && !ModulePrefs.available) {
+            Log.w(
+                TAG,
+                "熔断态：配置通道也不可用（${ModulePrefs.diag}）" +
+                    "⇒ 收不到 App 的「重新启用」，只能靠 App 借 root 清零 / adb 清键",
+            )
+            return
+        }
+
+        var last = runCatching { ModulePrefs.getString(PrefsBridge.BREAKER_RESET, null) }.getOrNull()
+        ModulePrefs.subscribe {
+            val raw = runCatching { ModulePrefs.getString(PrefsBridge.BREAKER_RESET, null) }
+                .getOrNull() ?: return@subscribe
+            if (raw == last) return@subscribe
+            last = raw
+            Log.i(TAG, "收到熔断复位请求（$raw）⇒ 清零启动计数并重新尝试启动")
+
+            val h = resumeHostCtx ?: return@subscribe
+            runCatching { PrefsBridge.writeInt(h.contentResolver, PrefsBridge.BOOT_ATTEMPTS, 0) }
+                .onFailure { Log.w(TAG, "熔断计数清零失败", it) }
+            // ⚠️ 这里**只是**把 start 再喊一次。它照样要过阈值闸（现在读到 0 了）——
+            //   所以"用户点了重新启用"并不会绕过熔断机制，只是给了它一次新的机会。
+            runCatching { start(h, resumeAppCtx, resumeClassLoader) }
+                .onFailure { Log.w(TAG, "熔断复位后重试启动失败", it) }
+        }
+        Log.w(
+            TAG,
+            "熔断已生效：不再自动启动。等用户在 App 里点「重新启用」（监听键 ${PrefsBridge.BREAKER_RESET}）",
+        )
     }
 
     /**
