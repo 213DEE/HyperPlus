@@ -15,6 +15,7 @@ _build.log
 *.log
 *.apk
 *.aab
+*.idsig
 
 # ---- 一次性探针 / 临时导出（不属于产品） ----
 _probe/

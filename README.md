@@ -207,6 +207,8 @@ app/src/main/java/cn/dsr213/hyperplus/
 | 内屏 | 1672 × 2364（608dp） |
 | 外屏 | 1168 × 1712（425dp） |
 
+> 机型与 ABI 在 2026-10-03 复核过；其余字段实测于 2026-09-28。
+
 **运行环境（实测）**
 
 | 项 | 值 |
@@ -491,6 +493,8 @@ two-step calibration.
 | ABI | arm64-v8a |
 | Inner screen | 1672 × 2364 (608dp) |
 | Outer screen | 1168 × 1712 (425dp) |
+
+> Model and ABI re-checked on 2026-10-03; the remaining fields were measured on 2026-09-28.
 
 **Runtime (measured)**
 
