@@ -22,6 +22,14 @@ import java.util.concurrent.CopyOnWriteArrayList
  * App 只需写自己的 prefs（零权限），root 依赖就此消失。
  *
  * ============================ 机制（LSPosed 官方 Wiki 实证） ============================
+ * ⚠️⚠️ **2026-10-03 状态变更 —— 这条通道有到期日**：本类用的 LSPosed「New XSharedPreferences」
+ *   **已被官方标记为废弃**，计划在 **LSPosed 2.3.0 移除**；v2.2.0 起模块页会对本模块弹
+ *   「此模块使用了已废弃且即将移除的功能」。届时 `getPreferencesDir()` 不再重定向到 safe-zone、
+ *   `checkMode` 不再放行 `MODE_WORLD_READABLE` ⇒ **配置下行（App → 引擎）会断**，
+ *   且**失败是静默的**（读不到不抛异常，现象只是"设置点了没反应"）。
+ *   ⇒ 动这个类之前先读 `docs/配置通道_nsp废弃警告_2026-10-03.md`（证据链 + 两条出路对比）。
+ *   ❓ 那条"退回旧式"的路（`xposedminversion=82` + 删 `xposedsharedprefs`）**尚未验证**。
+ *
  * 前提：模块的 `xposedminversion >= 93`（或声明 `xposedsharedprefs` 元数据）——
  * 本工程 Manifest 里**本来就是 93**，等于零成本满足。
  *
@@ -134,10 +142,15 @@ internal object ModulePrefs {
      * 打开配置。**幂等**，失败返回 null（调用方必须处理，不能假设它一定成功）。
      *
      * 失败的三个真实原因，都要如实报出来，不能静默：
-     *   - 模块没在 LSPosed 里**启用** ⇒ SystemUI 里压根没有我们；
-     *   - 模块**没把自己勾进作用域** ⇒ App 进程不被注入 ⇒ prefs 没被重定向到 safe-zone，
-     *     写在了 `/data/data/<pkg>/shared_prefs/`（SELinux `app_data_file`，SystemUI 读不了）。
-     *     ⚠️ 这是最容易踩的一条，App 侧会单独诊断并提示用户（见 `AppPrefs.appChannelOk`）；
+     *   - 模块没在 LSPosed 里**启用**，或作用域里**漏勾 `com.android.systemui`**
+     *     ⇒ SystemUI 里压根没有我们；
+     *   - 本应用进程没被注入 ⇒ prefs 没被重定向到 safe-zone，写在了
+     *     `/data/data/<pkg>/shared_prefs/`（SELinux `app_data_file`，SystemUI 读不了）。
+     *     ⚠️ 这一条**与作用域无关、用户也无需操作**（2026-10-03 更正，此前注释与界面文案
+     *     都错误地让用户"把 HyperPlus 自己勾进作用域"—— 列表里根本没有它）：
+     *     legacy 模块（`assets/xposed_init` 入口）由 LSPosed 保存作用域时**自动**把自己的包
+     *     加进 scope，并把它从列表里过滤掉。详见 `docs/配置通道_*_2026-10-03`。
+     *     App 侧仍会单独诊断并提示（见 `AppPrefs.appChannelOk`）；
      *   - 用户从未打开过 App ⇒ prefs 文件还没被创建（Android 只在首次写入时落盘）。
      *     ⇒ 这条由 `AppPrefs.init` 主动落一次盘来兜（见那边的注释）。
      */
@@ -182,8 +195,7 @@ internal object ModulePrefs {
                 //   所以⛔ 不能写 markdown —— 星号在真机上是**原样显示**的。
                 //   （2026-10-03 修：这是同一错误的第三处，前两处在 AppWhitelistPage / AppPrefs。）
                 diag = "配置为空或读不到（path=$f, canRead=$canRead）—— 检查：① HyperPlus 在 LSPosed " +
-                    "里已启用；② 作用域里勾上了 HyperPlus 自己（否则配置写不到这里）；" +
-                    "③ 装好后打开过一次 App"
+                    "里已启用，且作用域勾了「系统界面」；② 装好后打开过一次 App"
                 Log.w(TAG, diag)
                 return null
             }

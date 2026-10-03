@@ -492,10 +492,19 @@ object AppPrefs {
      *   配置能被引擎读到的**前提**是 prefs 文件落在 LSPosed 的 safe-zone
      *   （`/data/misc/<uuid>/prefs/<pkg>/`，SELinux `magisk_file`、目录 711、文件 664），
      *   而那要靠 LSPosed 在**本应用进程**里 hook `ContextImpl.getPreferencesDir()` 才会发生。
-     *   而按 `ConfigManager` 的作用域缓存，一个模块只会被注入到
-     *   「它自己勾选过的包」以及**它自己**（`// Always allow the module to inject itself`）——
-     *   ⇒ 若用户没在作用域里勾上 HyperPlus 自己，本应用进程**不会**被注入，
-     *   prefs 就老老实实写在 `/data/data/<pkg>/shared_prefs/`，SystemUI 读不到。
+     *   按 `LoadedApkCreateCLHooker.afterHookedMethod`，这个 hook 只在
+     *   「当前进程就是模块自己的包」且该包在 `XposedInit.loadedModules` 里时安装，
+     *   ⇒ 本应用进程被注入是**硬前提**。
+     *
+     * ⚠️ **但这不需要用户做任何事**（2026-10-03 更正）：
+     *   此前这里写着「若用户没在作用域里勾上 HyperPlus 自己，本应用进程不会被注入」——
+     *   **是错的**。本模块用 `assets/xposed_init` 声明入口 = legacy 模块，而 LSPosed
+     *   在保存作用域时会**自动把模块自己的包也写进 scope**
+     *   （管理器侧 `ConfigManager.setModuleScope` 的 `if (legacy) { … }` 分支，
+     *   `userId = 0`），并且**刻意把它从作用域列表里过滤掉**（同文件 `getModuleScope`、
+     *   以及 `ScopeAdapter` 的 `packageName.equals(module.packageName)` 分支）
+     *   ⇒ 用户在列表里看不到、也不需要勾它。
+     *   ⇒ 界面提示**不许**再让用户去勾 HyperPlus 自己（勾不到），指向「启用模块 + 勾系统界面」。
      *
      * ★ 判据取"`MODE_WORLD_READABLE` 有没有被放行"而不是猜路径：
      *   LSPosed 的 `checkMode` hook 与 `getPreferencesDir` hook 是**同一处代码**里一起装的

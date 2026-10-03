@@ -25,10 +25,10 @@
     <string name="settings_title">設定</string>
     <string name="settings_channel_broken">⚠️ 設定暫時不會生效</string>
     <string name="settings_channel_default">本應用程式的系統模組沒有啟用。</string>
-    <string name="settings_channel_fix">修好之前所有開關都不生效 —— 在 LSPosed 裡把 HyperPlus 自己也勾進作用域（不只是「系統介面」）。</string>
+    <string name="settings_channel_fix">修好之前所有開關都不生效 —— 在 LSPosed 裡啟用 HyperPlus，並給它的作用域勾上「系統介面」。</string>
     <!-- 設定通道自檢的**原因**（2026-10-03 從 AppPrefs 的硬編碼中文搬來，字面量逐字一致） -->
     <string name="channel_ready">已就緒：設定寫在共享目錄裡，旋轉服務讀得到</string>
-    <string name="channel_not_ready">未就緒：設定只寫進了應用程式私有目錄，旋轉服務讀不到。請在 LSPosed 裡把 HyperPlus 自己也勾進作用域，然後重啟本應用程式。</string>
+    <string name="channel_not_ready">未就緒：設定只寫進了應用程式私有目錄，旋轉服務讀不到。請在 LSPosed 裡確認 HyperPlus 已啟用、作用域勾了「系統介面」，然後重啟本應用程式。</string>
     <string name="settings_section_monitor">監控與除錯</string>
     <string name="settings_status_title">目前狀態</string>
     <string name="settings_status_summary">執行狀態 · 方向控制 · 目前方向 · 半自動按鈕</string>

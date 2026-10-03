@@ -40,10 +40,10 @@
     <string name="settings_title">Settings</string>
     <string name="settings_channel_broken">⚠️ Settings won\'t take effect yet</string>
     <string name="settings_channel_default">This app\'s system module isn\'t enabled.</string>
-    <string name="settings_channel_fix">Until it\'s fixed nothing here works — in LSPosed, enable HyperPlus itself too (not just “System UI”).</string>
+    <string name="settings_channel_fix">Until it\'s fixed nothing here works — in LSPosed, enable HyperPlus and tick “System UI” in its scope.</string>
     <!-- Why the config channel self-check failed (2026-10-03: moved out of AppPrefs so it can be localized) -->
     <string name="channel_ready">Ready: settings live in the shared folder and the rotation service can read them</string>
-    <string name="channel_not_ready">Not ready: settings only go to this app\'s private folder, so the rotation service can\'t read them. In LSPosed, enable HyperPlus itself too, then restart this app.</string>
+    <string name="channel_not_ready">Not ready: settings only go to this app\'s private folder, so the rotation service can\'t read them. In LSPosed, make sure HyperPlus is enabled and “System UI” is ticked in its scope, then restart this app.</string>
     <string name="settings_section_monitor">Monitoring &amp; troubleshooting</string>
     <string name="settings_status_title">Current status</string>
     <string name="settings_status_summary">Runtime · Rotation control · Current orientation · Semi-auto button</string>

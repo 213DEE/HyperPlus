@@ -126,7 +126,7 @@
         android:supportsRtl="true"
         android:theme="@style/Theme.FaceRotateMvp">
 
-        <!-- LSPosed 模块元数据。作用域锁定 com.android.systemui（见 res/values/arrays.xml） -->
+        <!-- LSPosed 模块元数据。作用域只需要 com.android.systemui（见 res/values/arrays.xml） -->
         <meta-data
             android:name="xposedmodule"
             android:value="true" />
@@ -144,11 +144,17 @@
           这里再写一遍是**把意图写在明面上**：将来谁把 xposedminversion 降回 92，
           配置通道不会跟着悄悄失效。
 
-          ⚠️ 它生效的前提是**本应用进程也要被注入**，而按 LSPosed 的作用域缓存，
-          一个模块只会被注入「它自己勾选过的包」以及它自己
-          （`// Always allow the module to inject itself`）。
-          ⇒ **在 LSPosed 里必须把 HyperPlus 自己也勾进作用域**，否则配置写不到共享目录，
-          引擎读不到。App 会自检并把这条提示出来（见 AppPrefs.appChannelOk）。
+          ⚠️ 它生效的前提是**本应用进程也要被注入** —— 但这件事**不需要用户做**，
+          也**做不到**（2026-10-03 更正，此前 README / 文档 / 界面文案里
+          「作用域里要勾 HyperPlus 自己」是错的，被抄了十几处）：
+          凡是用 `assets/xposed_init` 声明入口的 legacy 模块（本工程就是），
+          LSPosed 管理器在保存作用域时会**自动把模块自己的包加进去**
+          （管理器侧 `ConfigManager.setModuleScope` 里的 `if (legacy) { … app.packageName
+          = packageName … }`），读回来时又**两处过滤掉**（同文件 `getModuleScope`
+          与 `ScopeAdapter` 的 `packageName.equals(module.packageName)` 分支）
+          ⇒ **作用域列表里根本看不到 HyperPlus 自己**。
+          ⇒ 用户只需要勾 `com.android.systemui`；⛔ 别再写"必须勾 HyperPlus 自己"。
+          App 会自检并把结论显示在「配置通道」卡片里（见 AppPrefs.appChannelOk）。
         -->
         <meta-data
             android:name="xposedsharedprefs"

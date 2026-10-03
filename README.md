@@ -49,20 +49,23 @@
 
 | 需要什么 | 你会得到什么 |
 |---|---|
-| 装 APK ＋ root ＋ LSPosed；模块作用域**同时**勾选 `com.android.systemui` 与 **HyperPlus 自己** | 引擎常驻在**系统界面进程**里，**回桌面、锁屏、App 被强杀都继续生效** |
+| 装 APK ＋ root ＋ LSPosed；模块作用域勾选 **`com.android.systemui`**（只勾这一项） | 引擎常驻在**系统界面进程**里，**回桌面、锁屏、App 被强杀都继续生效** |
 
 **只有一个引擎，它住在系统界面进程里。** App 本身不跑引擎、不开相机，只是一块「遥控器 + 仪表盘」：
 你在这里改的每一项配置都写进一份配置文件，常驻引擎读同一份文件并实时跟随。
 
-**为什么作用域要勾两项**（这一条最容易漏）：
+**作用域只需要勾一项：`com.android.systemui`。**
 
 - `com.android.systemui` —— 引擎本体注入这里，于是「常驻」成立；
-- **HyperPlus 自己** —— 配置从「App 的进程」流到「引擎的进程」，走的是 LSPosed 官方的
-  `XSharedPreferences` 通道：只有 App 进程也被注入，它才会把配置写到引擎读得到的位置。
-  **漏掉这一项 = 界面上的开关全部无效**（配置写进了应用私有目录，引擎读不到）。
+- **「HyperPlus 自己」不用勾，而且在列表里根本找不到它** —— 配置从「App 的进程」流到
+  「引擎的进程」走的是 LSPosed 的 `XSharedPreferences` 通道，那条通道确实要求 App 进程
+  也被注入；但这件事**由 LSPosed 自己完成**：本模块用 `assets/xposed_init` 声明入口
+  （即 legacy 模块），LSPosed 在保存作用域时会自动把模块自己也加进去，并且**刻意不把它
+  显示在作用域列表里**。所以你在作用域界面找不到 HyperPlus 是设计如此，不是装坏了；
+  **只勾「系统界面」，不用去找自己。**
 
-> App 会自检并把这个结论直接写在「配置通道」卡片里 —— 通道没打通时它明确告诉你原因，
-> 而不是让你对着一堆点了没反应的开关猜。
+> 万一通道真没打通（模块没启用、或装好后从没打开过 App），App 会自检并把这个结论直接写在
+> 「配置通道」卡片里 —— 而不是让你对着一堆点了没反应的开关猜。
 
 **不需要额外的权限。** 相机与「修改系统设置」都由系统界面进程自带的权限承担；
 半自动模式的悬浮按钮同理（系统界面是 system uid，不需要「显示在其他应用上层」）。
@@ -215,7 +218,7 @@ app/src/main/java/cn/dsr213/hyperplus/
 |---|---|
 | root | KernelSU（**late-load 临时 root**，重启即失效） |
 | 注入框架 | LSPosed（Zygisk） |
-| 模块作用域 | `com.android.systemui` ＋ `cn.dsr213.hyperplus` |
+| 模块作用域 | `com.android.systemui`（**只勾这一项**；HyperPlus 自己不显示、也不用勾） |
 
 **构建工具链（工程实测）**
 
@@ -250,7 +253,7 @@ app/src/main/java/cn/dsr213/hyperplus/
 **早期开发阶段（Alpha）。** 已知边界：
 
 - 引擎常驻在系统界面进程里，已真机实测（**回桌面 / 锁屏 / 强杀 App 后引擎仍在工作**），
-  但它**依赖 root 与 LSPosed**，而且**模块没启用 / 作用域漏勾 HyperPlus 自己 = 功能不可用**
+  但它**依赖 root 与 LSPosed**，而且**模块没启用 / 作用域漏勾「系统界面」= 功能不可用**
   （这是"引擎只有一个、且住在系统进程里"的必然含义，没有退路可走）。
 - **已知盲区**：触发源是朝向传感器（设备动了才唤醒）。手机架在桌上不动、只有人头转过去的情况**不会触发** —— 目前**没有**"屏幕亮起 / 解锁"之类的兜底触发源。
 - 部分机型的朝向传感器在熄屏时不唤醒，触发层可能收不到事件。
@@ -323,23 +326,26 @@ That is the one problem it solves, and it touches nothing else in the system.
 
 | Requirements | What you get |
 |---|---|
-| APK + root + LSPosed, with the module scope set to **`com.android.systemui`** *and* **HyperPlus itself** | The engine lives inside the **SystemUI process**: it keeps working after you return to the home screen, lock the screen, or force-stop the app |
+| APK + root + LSPosed, with the module scope set to **`com.android.systemui`** (that one entry only) | The engine lives inside the **SystemUI process**: it keeps working after you return to the home screen, lock the screen, or force-stop the app |
 
 **There is exactly one engine, and it lives in the SystemUI process.** The app itself runs no engine and
 opens no camera — it is a remote control plus a dashboard. Everything you change here is written to a
 configuration file, and the resident engine reads that same file and follows along.
 
-**Why two entries in the scope list** (this is the easy one to miss):
+**The scope needs exactly one entry: `com.android.systemui`.**
 
 - `com.android.systemui` — the engine itself is injected there, which is what makes it resident;
-- **HyperPlus itself** — config travels from the app process to the engine process over LSPosed's
-  official `XSharedPreferences` channel, and that only works if the app process is injected too:
-  only then will it write the config where the engine can read it.
-  **Miss this one and every switch in the UI silently does nothing** (the config lands in the app's
-  private directory, which the engine cannot read).
+- **HyperPlus itself is neither needed nor even listed** — config travels from the app process to the
+  engine process over LSPosed's `XSharedPreferences` channel, and that does require the app process
+  to be injected too; but **LSPosed does that on its own**: this module declares its entry point in
+  `assets/xposed_init` (i.e. it is a legacy module), so LSPosed automatically adds the module itself
+  to the scope whenever it saves the scope, and deliberately **hides that entry from the scope list**.
+  So not finding HyperPlus in the scope list is by design, not a broken install; **tick "System UI"
+  and stop looking for yourself.**
 
-> The app self-checks this and states the conclusion right in its "config channel" card — when the
-> channel is broken it tells you why, instead of leaving you to guess in front of dead switches.
+> If the channel really is broken (module not enabled, or the app has never been opened after
+> installing), the app self-checks and states the conclusion right in its "config channel" card —
+> instead of leaving you to guess in front of dead switches.
 
 **No extra grants are needed.** The camera and "modify system settings" come from permissions the
 SystemUI process already holds, and the semi-auto floating button works the same way (SystemUI runs
@@ -502,7 +508,7 @@ two-step calibration.
 |---|---|
 | root | KernelSU (**late-load temporary root**; lost on reboot) |
 | Injection framework | LSPosed (Zygisk) |
-| Module scope | `com.android.systemui` + `cn.dsr213.hyperplus` |
+| Module scope | `com.android.systemui` (**this one entry only**; HyperPlus itself is not listed and is not needed) |
 
 **Toolchain (measured from this project)**
 
@@ -541,7 +547,7 @@ two-step calibration.
 
 - The engine lives inside the SystemUI process and is verified on a real device (**it survives returning
   to the home screen, locking the screen, and force-stopping the app**), but it **requires root and
-  LSPosed** — and **if the module is not enabled, or HyperPlus itself is missing from the scope, the
+  LSPosed** — and **if the module is not enabled, or "System UI" is missing from the scope, the
   feature simply does not work** (that is the necessary consequence of having exactly one engine, living
   in the system process; there is no fallback path).
 - **Known blind spot**: the trigger is the orientation sensor, which only fires when the *device* moves. Phone propped on a desk while only your head turns **will not trigger** — there is currently **no** screen-on/unlock fallback trigger.
