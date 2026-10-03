@@ -20,7 +20,7 @@ android {
         applicationId = "cn.dsr213.hyperplus"
         minSdk = 30
         targetSdk = 35
-        versionCode = 5
+        versionCode = 6
         // ★ Alpha 阶段统一带 -Alpha 后缀。VersionChecker 会解析这个字符串
         //   去和 GitHub Release 的 tag_name 比较（见 VersionChecker.parse）
         //
@@ -33,11 +33,14 @@ android {
         //     ⇒ 用户看到的正是「版本号一直不变」。**别让它再漏第二次。**
         //   ⚠️ 一个号只能发一次：发过的号**封存**，不许重号、不许"改一改重发"、不许只改包不涨号。
         //   ★ 完整流程与自检命令见技能 `github-repo-publish` §7（那里是唯一权威描述）。
+        //   ✅ 执行记录：v0.5.0-alpha 发布后**同一轮**就涨到了 0.6.0（这次没漏）。
         //
         // 0.4.0：引擎搬进 SystemUI 常驻（解掉"回桌面被系统接管"）+ 跨进程配置镜像
         // 0.5.0：启动熔断（治「装完就崩、系统界面反复重启、进不了桌面」）
         //        ＋ 配置通道改「广播 + 引擎代写」（摆脱对 LSPosed nsp 的依赖，第一步）
-        versionName = "0.5.0-Alpha"
+        // 0.6.0：迁移到 LSPosed 新 API（libxposed，targetApiVersion 102）——
+        //        模块元数据 / 入口 / hook 层整体换血，摘掉"使用了已废弃功能"的横幅
+        versionName = "0.6.0-Alpha"
 
         // ★ 只打 **arm64-v8a 一套**原生库（2026-10-03 加）。
         //
