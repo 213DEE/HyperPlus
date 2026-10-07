@@ -23,18 +23,39 @@
 
 ### 它能做什么
 
+**旋转**
+
 | 能力 | 说明 | 状态 |
 |---|---|---|
 | **人脸方向跟随旋转** | 前置摄像头看一眼你脸朝哪，屏幕就朝哪 | ✅ 真机实测（需先在「实验功能」里打开开关） |
 | **半自动旋转（点击确认）** | 转手机时右下角弹出按钮，**点一下才转**；不开摄像头，最省电 | ✅ 真机实测 |
 | **跟随系统** | 本应用完全不介入，用系统自带的自动旋转 | ✅ 真机实测 |
+| **暗光降级** | 光线太暗或认不出脸时，改成「点一下才转」；光线恢复后自动切回 | 🔎 已实现 |
+| **每应用单独挑旋转方式** | 逐个应用指定：跟随全局 / 跟随系统 / 人脸 / 半自动；没指定的跟随全局那一档 | ✅ 真机实测 |
+| **旋转应用名单** | 名单里的应用（游戏、长视频）不弹按钮、不改方向 | ✅ 真机实测 |
+| **控制中心快捷开关** | 三档循环切换，不用打开 App | ✅ 真机实测 |
+| **方向** | 展开后内屏保持的方向，四选一（按摄像头位置选）；引擎另按重力自动纠正 | 🔎 已实现，**需要 root** |
+
+**分屏增强**
+
+| 能力 | 说明 | 状态 |
+|---|---|---|
+| **轻折加分屏** | 轻折一下机身，把当前应用挤成半屏、分屏数 +1；当前应用留在哪一侧可选（朝左 / 朝右） | ✅ 真机实测 |
+| **分屏应用名单** | 名单里的应用（默认 = 市面上常见游戏）折一下也不分屏 | ✅ 真机实测 |
+| **高温保护可配置** | 增加分屏格子的温度上限可调、过热保护可关闭（默认 47°C，是出厂设定值） | ✅ 真机实测 |
+| **提高分屏上限** | 实验开关，打开后折叠时最多同时摆 8 个应用（系统默认 6 个）；改完要重启一次系统界面 | 🔎 已实现，**需要 root** 写开关 |
+
+**通用**
+
+| 能力 | 说明 | 状态 |
+|---|---|---|
 | **常驻生效** | 引擎住在系统界面进程里，回桌面 / 锁屏 / App 被强杀后仍然生效 | ✅ 真机实测 |
 | **不常开摄像头** | 靠朝向传感器唤醒，一次只采约 1 秒，采完立刻释放 | ✅ 真机实测 |
 | **绝不和别的 App 抢摄像头** | 四道闸门保证：正在扫码 / 视频通话时本应用自动让位 | ✅ 真机实测 |
-| **应用名单** | 名单里的应用（游戏、长视频）不弹按钮、不改方向 | ✅ 真机实测 |
-| **控制中心快捷开关** | 三档循环切换，不用打开 App | ✅ 真机实测 |
-| **内屏 / 外屏分别设置** | 折叠屏两块屏的模式互不影响 | ✅ 真机实测 |
-| **方向** | 展开后内屏保持的方向，四选一（按摄像头位置选，需要 root）；引擎另按重力自动纠正 | 🔎 已实现，**需要 root** |
+| **外屏交给系统** | 增强只作用在展开后的内屏；合上后本应用不介入，屏幕仍由系统自动旋转决定 | ✅ 真机实测 |
+| **权限管理页** | 模块 / root / 修改系统设置三项自检，缺哪项点哪一行去授权，可随时重新检测 | ✅ 真机实测 |
+| **导出诊断日志** | 一键导出设备信息、模块状态与运行日志（没 root 也能导出）；报告含系统崩溃与重启记录 | ✅ 真机实测 |
+| **重启系统界面** | 设置页一键重启状态栏与导航栏，改了设置没生效时用 | 🔎 已实现，**需要 root** |
 | **界面多语言** | 简体中文 / 繁体中文 / English，跟随系统或手动指定 | 🔎 已实现 |
 | **更新提醒** | 启动时检查 GitHub Release 是否有新版本 | 🔎 已实现 |
 
@@ -74,11 +95,11 @@
 | 需要 | 具体 |
 |---|---|
 | root | 任意（KernelSU / Magisk …） |
-| LSPosed | **需支持 Xposed API 93**（本模块声明 `xposedminversion=93`；现行的 LSPosed 2.x 都满足，1.8 及更早的版本不行） |
+| LSPosed | **需支持 libxposed API 101 及以上**（本模块声明 `minApiVersion=101` / `targetApiVersion=102`；现行的 LSPosed 2.x 都满足，1.8 及更早的版本不行） |
 | Android | **11 及以上**（本模块 `minSdk 30`） |
 | CPU | **arm64-v8a**。APK 只带这一套原生库 ⇒ **纯 32 位机型直接装不上** |
 | 摄像头 | **必须有前置摄像头**（清单里声明为必需硬件） |
-| 空间 | APK 约 40 MB，装机后还会解出约 8.6 MB 原生库 |
+| 空间 | APK 约 41 MB，装机后还会解出约 8.6 MB 原生库 |
 
 > 除此之外**没有别的依赖**：不下载模型（人脸模型打在 APK 里）、不需要 GMS、也不需要 HyperOS
 > （只有「默认方向」那一项用到系统私有键，非 HyperOS 上它读不到值、界面会如实说明）。
@@ -100,7 +121,8 @@
 
 **为什么是「反复」重启**：本模块的引擎住在系统界面进程里，而「出错就停用」这个开关只在
 **当前这一次系统界面进程**里有效 —— 进程一重启它就复位，于是同一个故障会被一遍遍重放。
-我们正在把它改成「连续失败就熔断、不再自动启动」。
+**0.5.0 起已有启动熔断兜底**：同一个故障连着重放 3 次（每次都没能活过 60 秒）就不再自动启动，
+系统界面不会无限重启；要恢复，在 App 里点一下「重新启用」即可。
 
 **要反馈的话，请附上这三样**（有一样就够定位）：
 
@@ -115,7 +137,7 @@ adb shell ls -l /data/tombstones/            # 这里有文件 = native 崩溃�
 **0.6.0 起这条提示已经消失** —— 模块已迁移到 LSPosed 的新 API，模块页会显示 `API 102`。
 它本来也不是故障；如果你看到它，说明装的是 0.5.0 或更早的版本，升级即可。
 
-### 三种模式，内屏 / 外屏各存一份
+### 三种模式（只作用在展开后的内屏）
 
 | 档位 | 判据 | 开摄像头？ | 谁拍板 |
 |---|---|---|---|
@@ -127,8 +149,9 @@ adb shell ls -l /data/tombstones/            # 这里有文件 = native 崩溃�
 没有单独的「关闭旋转」档：它本来就是系统那份设置里的另一个位置，拆成本应用的独立一档
 只会让"系统设置"和"本应用"两个地方各说各话（理由写在 `AppPrefs.kt` 的 `RotateMode` 注释里）。
 
-**内屏和外屏的模式是两份、互不影响**（折叠屏用得到：合上只用外屏时常是扫码看通知，设成半自动更省电；
-展开用内屏时仍要自动转）。区别只看**当前显示的最小宽度**：
+**增强只作用在展开后的内屏。** 合上手机用外屏时，本应用完全不介入 —— 屏幕仍由系统自带的自动旋转决定
+（2026-09-29 起取消了外屏增强：外屏小、多是扫码看通知，单独再留一套模式没有下游）。
+区分内外屏只看**当前这块屏的最小宽度**：
 
 | | 像素 | 换算（密度 440dpi = 2.75x） | 判定 |
 |---|---|---|---|
@@ -160,16 +183,25 @@ adb shell ls -l /data/tombstones/            # 这里有文件 = native 崩溃�
 
 | 数据 | 方向 | 走哪 | 要 root 吗 |
 |---|---|---|---|
-| 模式 / 策略 / 门控开关 | App → 引擎 | App 的 prefs（LSPosed 的 `XSharedPreferences` 通道） | ❌ |
-| 标定请求（你点按钮） | App → 引擎 | App 的 prefs | ❌ |
+| 模式 / 策略 / 门控开关 / 两份应用名单 | App → 引擎 | App 的私有 prefs ⇒ 变更即发一条**广播（全量快照）** ⇒ 引擎再落一份镜像到 `Settings.System` | ❌ |
+| 请求类（校准 / 测悬浮按钮 / 重置熔断） | App → 引擎 | 同上 | ❌ |
+| 「提高分屏上限」开关 | App → 引擎 | 优先走**系统属性** `persist.sys.hyperplus.multisplit`（引擎进程第一个毫秒就能读到）⇒ 没写过时回落到上面那条镜像 | ⚠️ 写属性需要 root |
 | 标定值（sign / 偏移） | 引擎自己算并持久化 | `Settings.System` | ❌（引擎是特权包） |
 | 接管标志 / 交还目标 / 前摄 id | 引擎自己的账 | `Settings.System` | ❌ |
 | 状态 / 心跳 / 标定结果 | 引擎 → App | `Settings.System` | ❌ |
 
 原因很简单：**App 写不了非公开的系统设置键**（判据见「安装」一节），而**引擎写不了 App 的私有文件**
 （跨 uid + SELinux 双重拦截）—— 让各自写自己写得动的东西，两边就都不需要 root。
-引擎侧的变更检测同时跑「文件监听 + 2 秒兜底轮询」：LSPosed 的文件监听依赖被监控目录的读权限，
-而它给的共享目录只有执行位（源码级推断，见 `ModulePrefs` 的类注释），所以不赌它。
+
+下行的完整链路就四条：**① 广播推全量快照**（带同签名权限，只有本应用能发）→ **② 引擎把它落成一份镜像**
+存进 `Settings.System` → **③ 引擎启动时先读那份镜像**（所以不依赖 App 在不在跑）→
+**④ 镜像为空时反向问 App 要一次**。
+
+> 📌 早先那条通道是「引擎用 LSPosed 的 `XSharedPreferences` 直接读 App 的 prefs 文件」，而它依赖的框架特性
+> 已被官方标记为废弃（用了它，模块页会常驻一条「使用了已废弃且即将移除的功能」横幅）。
+> **0.6.0 起整条换成上面这套**，横幅随之消失。「提高分屏上限」为什么还要额外一条属性通道 ——
+> 原因是**时序**：那个开关必须赶在系统读取上限值之前就位（实测那道截止线在进程启动后几百毫秒），
+> 而镜像那条路要等引擎起来，实测晚到约 4 秒，赶不上。
 
 ### 仓库结构
 
@@ -177,17 +209,26 @@ adb shell ls -l /data/tombstones/            # 这里有文件 = native 崩溃�
 app/src/main/java/cn/dsr213/hyperplus/
 ├── MainActivity.kt            薄壳界面：只挂载 Compose，**不含引擎**
 ├── AppPrefs.kt                配置真身（App 侧 prefs）＋ 引擎侧标定值的读写
-├── AppWhitelist.kt            应用名单：默认名单 ± 用户增删
+├── AppWhitelist.kt            旋转名单：默认名单 ± 用户增删
+├── SplitWhitelist.kt          ★ 分屏名单：「折一下也不分屏」的应用（默认 = 常见游戏）
+├── SplitStageGate.kt          ★ 「提高分屏上限」的判定核（纯函数，可离线单测）
+├── AdaptiveFallback.kt        ★ 暗光 / 认不出脸时的降级判定核
 ├── AppLocale.kt               界面语言（只管 App 进程）
 ├── ScreenForm.kt              内屏 / 外屏判据 ＋ 全工程唯一的屏幕尺寸量法
 ├── PanelOrientation.kt        两块屏的方向槽位（默认方向，**需要 root**）
 ├── RootShell.kt               借 root 执行系统命令的唯一出口
+├── SqliteBin.kt               自带 sqlite3 二进制（备用能力，当前无调用方）
 ├── PrefsBridge.kt             键名约定 ＋ 引擎侧写 Settings.System 的工具
+├── ConfigChannel.kt           ★ 配置下行通道：防抖后的全量快照广播
+├── ConfigRequestReceiver.kt   ★ 引擎反向「请推配置」请求的接单者
+├── AppToast.kt                ★ 短提示的唯一出口（App 进程）
 ├── ModuleLink.kt              App 侧：读引擎状态摘要、请求远程标定
+├── DiagnosticsCollect.kt      ★ 诊断报告：采集（含系统崩溃 / 重启记录）
+├── DiagnosticsReport.kt       ★ 诊断报告：排版与三态（未读到 / 空 / 值）
 ├── ── 引擎（只活在 LSPosed 宿主进程里） ──
 ├── AdaptiveEngine.kt          引擎主体：触发 → 让步 → burst → 判定 → 接管
-├── EngineHost / EngineLogic / EngineTuning / EngineErrors
-│                              宿主启动与异常兜底 / 纯逻辑 / 可调常量 / 错误归因
+├── EngineLogic / EngineTuning / EngineErrors / EngineText
+│                              纯逻辑 / 可调常量 / 错误归因 / 面向用户的措辞
 ├── CameraXBootstrap.kt        宿主进程里的 CameraX 初始化
 ├── OrientationDecider.kt      纯算法核心：roll → 屏幕方向（不依赖 Android，可离线单测）
 ├── OrientationFusion.kt       重力当尺子：校验人脸链路的符号位
@@ -195,8 +236,6 @@ app/src/main/java/cn/dsr213/hyperplus/
 ├── VoteTally.kt               多帧投票
 ├── FaceAnalyzer.kt            CameraX Analyzer ＋ 人脸检测多角度搜索
 ├── ForegroundGate.kt          前台朝向门（前台应用自管朝向时停手）
-├── Uncontrollable.kt          「实测不可控」的记账（哪些应用本模块真的转不动）
-├── LiveAngle.kt               实时角度（4Hz，引擎内部读数，不进配置通道）
 ├── HintSizePolicy.kt          悬浮按钮的尺寸策略
 ├── RotateHintOverlay.kt       半自动模式的「转一下？」悬浮按钮
 ├── CsvRecorder.kt             每帧原始数据落盘，供事后看曲线
@@ -206,20 +245,28 @@ app/src/main/java/cn/dsr213/hyperplus/
 │   └── DeviceOrientationTrigger.kt   朝向传感器触发层
 ├── module/                    ── 只在 LSPosed 宿主进程（系统界面）里跑的部分 ──
 │   ├── HyperPlusModule.kt     LSPosed 入口（加载即启动常驻引擎）
-│   ├── EngineHost.kt          常驻引擎宿主：启动 / 异常兜底 / 状态上报 / 心跳
-│   ├── ModulePrefs.kt         配置通道：读 App 的 prefs（＋ 兜底轮询）
+│   ├── EngineHost.kt          常驻宿主：启动 / 启动熔断 / 解锁闸 / 异常兜底 / 心跳
+│   ├── ModulePrefs.kt         配置通道：读推来的快照（＋ 镜像兜底）
+│   ├── SplitTrigger.kt        ★ 轻折加分屏：折角状态机 ＋ 触发系统那条分屏链
+│   ├── FoldJudge.kt           ★ 「轻折一下」的折角判定核（纯函数）
+│   ├── SplitProbe.kt          ★ 分屏观察探针（只打日志，用来定位系统走哪条链）
+│   ├── SplitStageLimit.kt     ★ 把多分屏格数上限抬到 8 的 hook
+│   ├── BootReport.kt          ★ 启动摘要落盘（不受日志滚动影响）
 │   ├── SystemUiLifecycle.kt   常驻 LifecycleOwner（SystemUI 没有 Activity）
-│   ├── HostEnv.kt             宿主环境：native so 预加载 ＋ 人脸模型初始化
+│   ├── HostEnv.kt             宿主环境：native so 预加载 ＋ 人脸模型初始化（含解锁闸）
 │   └── ModuleSelfCheck.kt     模块自检（默认关闭，可开关打开）
 └── ui/
     ├── AppNav.kt              全部页面与路由（唯一真值）
     ├── HyperPlusApp.kt        应用外壳
     ├── UiCommon.kt            共用组件
-    ├── FunctionPage.kt        主页一：功能（旋转增强 / 实验）
-    ├── SettingsPage.kt        主页二：设置（监控与排查 / 应用 / 关于 / 语言）
-    ├── RotationPage.kt        旋转增强（模式 / 开关 / 方向 / 预览按钮 / 应用名单）
-    ├── AppWhitelistPage.kt    应用名单
+    ├── FunctionPage.kt        主页一：功能（旋转增强 / 分屏增强 / 实验）
+    ├── SettingsPage.kt        主页二：设置（监控与排查 / 应用 / 维护 / 语言）
+    ├── RotationPage.kt        旋转增强（模式 / 开关 / 方向 / 应用名单）
+    ├── SplitScreenPage.kt     ★ 分屏增强（展开方向 / 名单入口 / 高温保护）
+    ├── AppWhitelistPage.kt    应用名单（旋转与分屏两份名单共用这一套界面）
+    ├── PermissionsPage.kt     ★ 权限管理（模块 / root / 修改系统设置）
     ├── DiagnosticsPage.kt     诊断
+    ├── DiagRecordsPage.kt     ★ 运行记录（日志存在哪、最近发生了什么）
     ├── StatusPage.kt          运行状态
     ├── ExperimentalPage.kt    实验功能
     ├── LanguagePage.kt        界面语言
@@ -300,9 +347,12 @@ app/src/main/java/cn/dsr213/hyperplus/
   自动启动（这就是"常驻"的代价：与系统版本强耦合）。因此本模块一旦在某台设备上不兼容，
   表现就是**「装完就崩、系统界面反复重启」，而用户还没打开过 App**。急救步骤与取证命令
   见上面的「装完出问题了怎么办」。
+  → **2026-10-07 已定位并修掉其中一类**：开机后**还没解锁**的那段时间系统存储是锁着的，
+  而初始化人脸检测会去读它 ⇒ 宿主的后台线程抛异常、把系统界面带走。现在**未解锁时引擎不启动**，
+  等解锁后再自动补起（真机上 5 次同类崩溃全部落在"未解锁"那一支）。
 - **已知盲区**：触发源是朝向传感器（设备动了才唤醒）。手机架在桌上不动、只有人头转过去的情况**不会触发** —— 目前**没有**"屏幕亮起 / 解锁"之类的兜底触发源。
 - 部分机型的朝向传感器在熄屏时不唤醒，触发层可能收不到事件。
-- 方向判定的符号与相位依赖具体机型的摄像头朝向与镜像方式，因此提供**两步标定**（竖屏基准 + 左横屏定方向），而不是把参数硬编码。
+- 方向判定的符号与相位依赖具体机型的摄像头朝向与镜像方式；**这一项已改为由引擎按重力自动纠正**（2026-10-04 起手动两步校准整块删除），不需要用户做任何标定。
 - 只在**一台**设备上验证过（见「测试环境」）。折叠屏的内屏 / 外屏差异、各家 ROM 的
   方向策略差异，都还没有足够的样本。
 - 早期开发阶段，具体实现手段与可行边界仍在验证中，本文不写死任何技术方案。
@@ -344,18 +394,39 @@ That is the one problem it solves, and it touches nothing else in the system.
 
 ### What it can do
 
+**Rotation**
+
 | Capability | What it means | Status |
 |---|---|---|
 | **Face-driven rotation** | The front camera takes one look at where your face points; the screen follows | ✅ Verified on device (enable it under "Experimental" first) |
 | **Semi-auto (tap to confirm)** | Turn the phone and a button appears; **the screen rotates only when you tap it**. No camera, lowest power | ✅ Verified on device |
 | **Follow system** | The app stays out of the way and uses the system auto-rotate toggle | ✅ Verified on device |
+| **Low-light fallback** | When it is too dark or no face is visible, the engine switches to tap-to-rotate; it switches back once there is enough light | 🔎 Implemented |
+| **Per-app rotation mode** | Pick a mode per app: follow global / follow system / face / semi-auto; apps you leave unset follow the global mode | ✅ Verified on device |
+| **Rotation app list** | Apps on the list (games, long videos) get no button and no rotation | ✅ Verified on device |
+| **Quick Settings tile** | Cycle the three modes without opening the app | ✅ Verified on device |
+| **Orientation** | Pick the orientation the inner screen unfolds into (one of four); the engine also self-corrects from gravity | 🔎 Implemented, **requires root** |
+
+**Split screen**
+
+| Capability | What it means | Status |
+|---|---|---|
+| **Light-fold to add a split** | A light fold squeezes the current app into half the screen and adds one pane; you choose which side the current app stays on (left / right) | ✅ Verified on device |
+| **Split app list** | Apps on the list (common games by default) are never split when you fold the screen | ✅ Verified on device |
+| **Configurable overheat guard** | The temperature limit for adding panes is adjustable and the guard can be turned off (default 47 °C, the factory value) | ✅ Verified on device |
+| **Raise the split limit** | Experimental switch: once on, up to 8 apps can be split while folded (the system default is 6); a SystemUI restart is needed | 🔎 Implemented, **root** needed to write the switch |
+
+**General**
+
+| Capability | What it means | Status |
+|---|---|---|
 | **Resident engine** | The engine lives in the SystemUI process — still working after returning home, locking the screen, or force-stopping the app | ✅ Verified on device |
 | **Camera is never kept open** | A hardware orientation sensor wakes a single ~1 s burst, then the camera is released | ✅ Verified on device |
 | **Never competes for the camera** | Four gates: while you scan a code or take a video call, this module steps aside | ✅ Verified on device |
-| **Per-app list** | Apps on the list (games, long videos) get no button and no rotation | ✅ Verified on device |
-| **Quick Settings tile** | Cycle the three modes without opening the app | ✅ Verified on device |
-| **Separate inner / outer settings** | The two panels of a foldable keep independent modes | ✅ Verified on device |
-| **Orientation** | Pick the orientation the inner screen unfolds into (one of four, requires root); the engine also self-corrects from gravity | 🔎 Implemented, **requires root** |
+| **Outer screen left to the system** | Enhancements apply only on the unfolded inner screen; once folded the app stays out of the way and system auto-rotate decides | ✅ Verified on device |
+| **Permissions page** | Self-check for module / root / write-system-settings; tap any missing row to grant it, re-check any time | ✅ Verified on device |
+| **Export diagnostic log** | One tap exports device info, module state and runtime logs (works without root); the report includes system crash and restart records | ✅ Verified on device |
+| **Restart System UI** | One tap restarts the status bar and navigation bar — use it when a change does not take effect | 🔎 Implemented, **requires root** |
 | **UI localisation** | Simplified Chinese / Traditional Chinese / English, system-following or manual | 🔎 Implemented |
 | **Update check** | Checks GitHub Releases for a newer version on launch | 🔎 Implemented |
 
@@ -400,11 +471,11 @@ install.
 | Requirement | Detail |
 |---|---|
 | root | any (KernelSU / Magisk …) |
-| LSPosed | must support **Xposed API 93** (this module declares `xposedminversion=93`; every current LSPosed 2.x does, 1.8 and older does not) |
+| LSPosed | must support **libxposed API 101 or newer** (this module declares `minApiVersion=101` / `targetApiVersion=102`; every current LSPosed 2.x does, 1.8 and older does not) |
 | Android | **11 or newer** (`minSdk 30`) |
 | CPU | **arm64-v8a** — the APK ships only that ABI, so **32-bit-only devices cannot install it at all** |
 | Camera | a **front camera is required** (declared as a required hardware feature) |
-| Storage | ~40 MB for the APK, plus ~8.6 MB of native libraries unpacked at install time |
+| Storage | ~41 MB for the APK, plus ~8.6 MB of native libraries unpacked at install time |
 
 > Nothing else is needed: no model download (the face model ships inside the APK), no Google Play
 > Services, no HyperOS (only "Default orientation" touches a private system key; elsewhere it reads
@@ -429,7 +500,9 @@ Stop the module first — that is the only urgent step:
 
 **Why it restarts "repeatedly"**: the engine lives inside the SystemUI process, and its "stop on any
 error" switch only holds for **the current SystemUI process** — a restart resets it, so the same fault
-is replayed over and over. We are changing it to a persisted breaker that stops auto-starting.
+is replayed over and over. **Since 0.5.0 a boot breaker caps this**: three replays in a row (each
+failing to survive 60 seconds) stop the engine from auto-starting, so SystemUI no longer loops
+forever. Tap "Re-enable" in the app to recover.
 
 **To report it, please attach these** (any one of them helps):
 
@@ -444,7 +517,7 @@ adb shell ls -l /data/tombstones/            # a file here = native crash, not a
 **This notice is gone as of 0.6.0** — the module now targets LSPosed's new API, and the module page
 shows `API 102`. It was never a fault; if you still see it you are on 0.5.0 or older — just upgrade.
 
-### Three modes, stored separately for each panel
+### Three modes (inner screen only)
 
 | Mode | Signal | Camera? | Who decides |
 |---|---|---|---|
@@ -457,10 +530,10 @@ toggle decides. There is deliberately no separate "rotation off" mode: that is j
 position of the same system setting, and duplicating it here would leave the system settings page and
 this app telling you two different things (the reasoning is in the `RotateMode` comment in `AppPrefs.kt`).
 
-**The inner and outer screens keep two independent sets of settings** — useful on a foldable: when
-closed you mostly glance at notifications or scan codes, so semi-auto saves power, while the inner
-screen still wants to follow your face. The only thing that distinguishes them is the **smallest
-current width**:
+**Enhancements apply only on the unfolded inner screen.** Once the phone is folded the app stays out
+of the way and system auto-rotate decides (the outer-screen enhancement was removed on 2026-09-29:
+the outer panel is small and mostly shows notifications or scan codes, so a second mode set had
+nothing to drive). The panels are told apart purely by the **smallest current width**:
 
 | | Pixels | Converted (440 dpi = 2.75×) | Verdict |
 |---|---|---|---|
@@ -494,18 +567,28 @@ own config file; what the engine computes for itself goes through the system set
 
 | Data | Direction | Route | Root? |
 |---|---|---|---|
-| Mode / strategy / gate switches | app → engine | the app's prefs (LSPosed `XSharedPreferences` channel) | ❌ |
-| Calibration requests (your button taps) | app → engine | the app's prefs | ❌ |
+| Mode / strategy / gate switches / both app lists | app → engine | the app's private prefs ⇒ a **broadcast (full snapshot)** on every change ⇒ the engine mirrors it into `Settings.System` | ❌ |
+| Requests (calibration / button test / breaker reset) | app → engine | same as above | ❌ |
+| "Raise split limit" switch | app → engine | preferably the **system property** `persist.sys.hyperplus.multisplit` (readable in the engine's very first millisecond) ⇒ falls back to the mirror above | ⚠️ writing the property needs root |
 | Calibration values (sign / offset) | computed and persisted by the engine | `Settings.System` | ❌ (the engine is a privileged package) |
 | Takeover flag / restore target / camera id | the engine's own bookkeeping | `Settings.System` | ❌ |
 | Status / heartbeat / calibration result | engine → app | `Settings.System` | ❌ |
 
 The reasoning is simple: **the app cannot write private system-settings keys** (see the Installation
 section), and **the engine cannot write the app's private files** (blocked by both the uid boundary and
-SELinux). Let each end write what it is actually able to write, and neither needs root. Change detection
-on the engine side runs *both* file watching and a 2-second polling fallback: LSPosed's file watcher
-needs read permission on the watched directory, while the shared directory it hands out is
-execute-only (a source-level inference — see the class comment in `ModulePrefs`), so we don't bet on it.
+SELinux). Let each end write what it is actually able to write, and neither needs root.
+
+The downlink is exactly four hops: **① a full-snapshot broadcast** (carrying a same-signature
+permission, so only this app can send it) → **② the engine mirrors it into `Settings.System`** →
+**③ on startup the engine reads that mirror first** (so it does not depend on the app running) →
+**④ if the mirror is empty it asks the app once, in reverse**.
+
+> 📌 The earlier channel had the engine read the app's prefs file directly via LSPosed's
+> `XSharedPreferences`, a framework feature now marked deprecated (using it makes the module page show a
+> permanent "uses a deprecated feature" banner). **That whole path was replaced in 0.6.0**, and the
+> banner went with it. The "raise split limit" switch additionally needs a system-property channel for a
+> **timing** reason: it must be in place before the system reads its stage limit (a deadline only a few
+> hundred milliseconds into process start), while the mirror route arrives roughly 4 seconds late.
 
 ### Repository layout
 
@@ -513,17 +596,26 @@ execute-only (a source-level inference — see the class comment in `ModulePrefs
 app/src/main/java/cn/dsr213/hyperplus/
 ├── MainActivity.kt            Thin shell: mounts Compose, **no engine**
 ├── AppPrefs.kt                The config itself (app-side prefs) + engine-side calibration values
-├── AppWhitelist.kt            Per-app list: default set ± user additions/removals
+├── AppWhitelist.kt            Rotation list: default set ± user additions/removals
+├── SplitWhitelist.kt          ★ Split list: apps never split on a fold (common games by default)
+├── SplitStageGate.kt          ★ Decision core for "raise split limit" (pure function, offline-testable)
+├── AdaptiveFallback.kt        ★ Fallback decision core for low light / no face
 ├── AppLocale.kt               UI language (app process only)
 ├── ScreenForm.kt              Inner/outer verdict + the project's only screen-measurement routine
 ├── PanelOrientation.kt        Per-panel orientation slot (default orientation, **needs root**)
 ├── RootShell.kt               The single place that runs a command as root
+├── SqliteBin.kt               Bundled sqlite3 binary (standby capability, no caller today)
 ├── PrefsBridge.kt             Key naming + engine-side helpers to write Settings.System
+├── ConfigChannel.kt           ★ Config downlink: debounced full-snapshot broadcast
+├── ConfigRequestReceiver.kt   ★ Handles the engine's reverse "please push your config" request
+├── AppToast.kt                ★ The single toast exit (app process)
 ├── ModuleLink.kt              App side: read the engine's status summary, request remote calibration
+├── DiagnosticsCollect.kt      ★ Diagnostics: collection (incl. system crash / restart records)
+├── DiagnosticsReport.kt       ★ Diagnostics: layout + three-state values (not read / empty / value)
 ├── ── engine (only alive inside the LSPosed host process) ──
 ├── AdaptiveEngine.kt          Engine: trigger → yield → burst → decide → take over
-├── EngineHost / EngineLogic / EngineTuning / EngineErrors
-│                              Host startup and panic handling / pure logic / tunables / error attribution
+├── EngineLogic / EngineTuning / EngineErrors / EngineText
+│                              Pure logic / tunables / error attribution / user-facing wording
 ├── CameraXBootstrap.kt        CameraX init inside the host process
 ├── OrientationDecider.kt      Pure algorithm: roll → screen orientation (unit-testable offline)
 ├── OrientationFusion.kt       Gravity as a ruler: validates the sign of the face pipeline
@@ -531,8 +623,6 @@ app/src/main/java/cn/dsr213/hyperplus/
 ├── VoteTally.kt               Multi-frame voting
 ├── FaceAnalyzer.kt            CameraX Analyzer + multi-angle face detection
 ├── ForegroundGate.kt          Foreground-orientation gate (stand down when the foreground app drives orientation)
-├── Uncontrollable.kt          Bookkeeping for apps this module genuinely cannot rotate
-├── LiveAngle.kt               Live angle (4 Hz, UI preview only — never enters the config channel)
 ├── HintSizePolicy.kt          Sizing policy for the floating button
 ├── RotateHintOverlay.kt       The "rotate?" floating button used by semi-auto mode
 ├── CsvRecorder.kt             Per-frame raw data dump for offline curve analysis
@@ -542,20 +632,28 @@ app/src/main/java/cn/dsr213/hyperplus/
 │   └── DeviceOrientationTrigger.kt   Sensor-driven trigger layer
 ├── module/                    ── runs only inside the LSPosed host process (SystemUI) ──
 │   ├── HyperPlusModule.kt     LSPosed entry point (starts the resident engine on load)
-│   ├── EngineHost.kt          Resident engine host: startup / panic handling / status reporting / heartbeat
-│   ├── ModulePrefs.kt         Config channel: reads the app's prefs (+ polling fallback)
+│   ├── EngineHost.kt          Resident host: startup / boot breaker / unlock gate / panic / heartbeat
+│   ├── ModulePrefs.kt         Config channel: reads the pushed snapshot (+ mirror fallback)
+│   ├── SplitTrigger.kt        ★ Light-fold-to-split: hinge state machine + native split chain
+│   ├── FoldJudge.kt           ★ Decision core for "a light fold" (pure function)
+│   ├── SplitProbe.kt          ★ Observation probe for split (logs only; finds which chain the system uses)
+│   ├── SplitStageLimit.kt     ★ Hook that raises the multi-split pane limit to 8
+│   ├── BootReport.kt          ★ Boot summary written to disk (survives logcat rotation)
 │   ├── SystemUiLifecycle.kt   Resident LifecycleOwner (SystemUI has no Activity)
-│   ├── HostEnv.kt             Host environment: native so preloading + face model init
+│   ├── HostEnv.kt             Host env: native so preloading + face model init (incl. the unlock gate)
 │   └── ModuleSelfCheck.kt     Module self-check (off by default, can be enabled)
 └── ui/
     ├── AppNav.kt              All pages and routes (single source of truth)
     ├── HyperPlusApp.kt        App shell
     ├── UiCommon.kt            Shared components
-    ├── FunctionPage.kt        Home page 1: Function (rotation / experimental)
-    ├── SettingsPage.kt        Home page 2: Settings (monitoring / apps / about / language)
-    ├── RotationPage.kt        Rotation (mode / switches / orientation / preview button / app list)
-    ├── AppWhitelistPage.kt    Per-app list
+    ├── FunctionPage.kt        Home page 1: Function (rotation / split / experimental)
+    ├── SettingsPage.kt        Home page 2: Settings (monitoring / apps / maintenance / language)
+    ├── RotationPage.kt        Rotation (mode / switches / orientation / app list)
+    ├── SplitScreenPage.kt     ★ Split enhancements (unfold direction / list entry / overheat guard)
+    ├── AppWhitelistPage.kt    App list (one shared UI for the rotation and split lists)
+    ├── PermissionsPage.kt     ★ Permissions (module / root / write system settings)
     ├── DiagnosticsPage.kt     Diagnostics
+    ├── DiagRecordsPage.kt     ★ Run records (where logs live, what happened recently)
     ├── StatusPage.kt          Runtime status
     ├── ExperimentalPage.kt    Experimental features
     ├── LanguagePage.kt        UI language
@@ -643,6 +741,11 @@ unfold orientation on the "Orientation" card.
   version). So if this module is incompatible with a given device, the symptom is **"crashes right
   after installing, SystemUI restarts in a loop"** — before the user has ever opened the app.
   Recovery steps and log commands are in "If something goes wrong after installing" above.
+  → **One such class was located and fixed on 2026-10-07**: while the device is **still locked after
+  boot**, system storage is not yet available, and initialising face detection reads it — so a
+  background thread inside the host throws and takes SystemUI down. The engine now **does not start
+  while the device is locked** and boots itself once you unlock (on the test device all 5 crashes of
+  this class landed in that "not yet unlocked" branch).
 - **Known blind spot**: the trigger is the orientation sensor, which only fires when the *device* moves. Phone propped on a desk while only your head turns **will not trigger** — there is currently **no** screen-on/unlock fallback trigger.
 - On some devices the orientation sensor does not wake while the screen is off, so the trigger layer may receive nothing.
 - The sign and phase of the orientation mapping depend on the specific device's camera orientation and mirroring; the engine corrects this automatically from gravity, so no manual calibration step is required.
