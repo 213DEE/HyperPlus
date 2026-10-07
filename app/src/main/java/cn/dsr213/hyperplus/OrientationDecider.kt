@@ -154,8 +154,6 @@ class OrientationDecider(
     private var pendingSince: Long = 0L
     private var lastFaceAt: Long = 0L
 
-    /** 标定用：最近一次归一化角，便于 UI 显示「当前落在哪个扇区」 */
-    val lastNormalized: Float get() = lastNorm
     private var lastNorm: Float = Float.NaN
 
     // ---------------------------------------------------------------- 桥接
@@ -194,13 +192,9 @@ class OrientationDecider(
         if (roll == null) {
             val lost = lastFaceAt > 0 && nowMs - lastFaceAt > cfg.faceLostMs
             // ★★ 2026-10-02：**没脸就把 lastNorm 清掉**，不许留上一次的值。
-            //   为什么必须清：`lastNormalized` 是「实时角度」那一行读数（`norm` 字段）的来源，
-            //   而 `PrefsBridge.LIVE_ANGLE` 的契约写的是「没脸时为空串」。原来不清，
-            //   后果是**实测到的**（00:39:30 起连续 130+ 秒 `norm=0.6` 而人脸字段已空）：
-            //   界面会一直显示一个**假的角度**，用户照着它做的判断全是错的 ——
-            //   这比显示"读不到"危险得多。
-            //   ⚠️ 决策路径不受影响：`lastNorm` 只被 [AdaptiveEngine.publishLiveAngle] 读，
-            //     写方向用的是 `committed`（由 `roll != null` 的分支维护）。
+            //   它是 [settle] 回报的 `normalized`（诊断日志里那一格）的来源，
+            //   留着旧值会让日志在「没脸」期间显示一个假的归一化角。
+            //   ⚠️ 决策路径不受影响：写方向用的是 `committed`（由 `roll != null` 的分支维护）。
             lastNorm = Float.NaN
             return Result(
                 rawRoll = Float.NaN,

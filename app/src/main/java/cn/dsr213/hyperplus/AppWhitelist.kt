@@ -60,8 +60,11 @@ package cn.dsr213.hyperplus
  *    主界面不声明"是极常见的写法，于是一个能转的应用被界面标成"不可转、不许关"。
  * 2. **"不许关"这个设计本身就是坏的**：判错了用户没有任何自救手段。
  *
- * ⇒ 现在只留**一条**豁免判据：**实测**（[Uncontrollable]——「我们真的写过方向、
- *   屏幕两次读回都没动」）。它不解释任何 ROM 语义，判错了还有"清除重测"的出口。
+ * ⇒ 2026-10-05 起，豁免判据**只剩白名单**（用户点的，一次集合查找，不需要任何推断）。
+ *   中间曾经补上来的第二条「实测」（原 `Uncontrollable`——「我们真的写过方向、
+ *   屏幕两次读回都没动」）也按用户点名删掉了。它虽然不解释 ROM 语义，但会把一个
+ *   **观测结论永久固化**下来，误记之后用户只能"清除重测"；现在改成转不动就弹一次
+ *   「旋转失败」，**不落盘、不改后续行为**。
  */
 internal object AppWhitelist {
 
@@ -75,8 +78,13 @@ internal object AppWhitelist {
      *   游戏是"停手"最主要的受益者（每轮触发 = 开前摄 + 8 帧 ML Kit 推理 ≈ 32 次/秒，
      *   与游戏抢 CPU/GPU 的表现就是"断触"）。
      *
-     * ⚠️ 这份清单是**尽力而为**（按 2026-09 国内常见游戏整理，包名以官方应用商店为准），
-     *   而且**写错无害**：不存在的包名永远不会成为前台应用，只是白占一行。
+     * ★★ **2026-10-05 联网核实过一轮**（用户当天要求"把市面上常见的游戏包名添加进默认列表"）：
+     *   按当期热度榜逐个核对了包名，新增 7 个、删除 1 个未证实的。带「★ 2026-10-05 核实」
+     *   标记的那些就是这一轮的产物。⛔ 别再按"厂商系都长这样"的直觉往里加 ——
+     *   那正是被删掉的 `com.miHoYo.ys.mi` 的成因（见清单末尾"已删除的条目"）。
+     *
+     * ⚠️ 这份清单仍是**尽力而为**（包名以官方应用商店为准），而且**写错无害**：
+     *   不存在的包名永远不会成为前台应用，只是白占一行。
      *   所以判据是"宁多勿少"——漏掉一个游戏的代价是"它在打游戏时还在抢推理"，
      *   多写一个错包名的代价是零。用户也能在界面上随时开关。
      */
@@ -92,6 +100,8 @@ internal object AppWhitelist {
         "com.tencent.jkchess",              // 金铲铲之战
         "com.tencent.tmgp.supercell.clashofclans",   // 部落冲突（国服）
         "com.tencent.tmgp.supercell.clashroyale",    // 皇室战争（国服）
+        "com.tencent.KiHan",                // 火影忍者手游（★ 2026-10-05 核实）
+        "com.tencent.nrc",                  // 洛克王国：世界（★ 2026-10-05 核实）
         // —— 网易系 ——
         "com.netease.dwrg",                 // 第五人格
         "com.netease.hyxd",                 // 荒野行动
@@ -100,23 +110,32 @@ internal object AppWhitelist {
         "com.netease.sky",                  // 光·遇
         "com.netease.onmyoji",              // 阴阳师
         "com.netease.race",                 // 王牌竞速
+        "com.netease.l22",                  // 永劫无间手游（★ 2026-10-05 核实）
+        "com.netease.yhtj.gg",              // 萤火突击（★ 2026-10-05 核实）
         // —— 米哈游 / 二次元 ——
-        "com.miHoYo.Yuanshen",              // 原神
+        "com.miHoYo.Yuanshen",              // 原神（国服）
+        "com.miHoYo.GenshinImpact",         // 原神（国际服，★ 2026-10-05 核实）
         "com.miHoYo.hkrpg",                 // 崩坏：星穹铁道
         "com.miHoYo.Nap",                   // 绝区零
         "com.miHoYo.bh3",                   // 崩坏 3
-        "com.miHoYo.ys.mi",                 // 云·原神
         "com.hypergryph.arknights",         // 明日方舟
         "com.bilibili.azurlane",            // 碧蓝航线
         "com.papegames.nn4",                // 无限暖暖
+        "com.kurogame.mingchao",            // 鸣潮（★ 2026-10-05 核实）
         // —— 其他大厂 / 国际服 ——
         "com.ztgame.bob",                   // 球球大作战
         "com.mojang.minecraftpe",           // 我的世界
+        "com.minitech.miniworld",           // 迷你世界（★ 2026-10-05 核实）
         "com.roblox.client",                // Roblox
         "com.supercell.clashofclans",       // 部落冲突（国际服）
         "com.supercell.clashroyale",        // 皇室战争（国际服）
         "com.supercell.brawlstars",         // 荒野乱斗（国际服）
         "com.blizzard.diablo.immortal",     // 暗黑破坏神：不朽
+        // —— ⚠️ 已删除的条目（记过案，别按旧印象加回来）——
+        // "com.miHoYo.ys.mi"（云·原神）：2026-10-05 联网核实**查不到这个包名**。
+        //   它当时是按"米哈游系都长这样"推的，属于 ❓ 未证实条目。
+        //   ⇒ 按本工程"宁可留空也不许写像答案的猜测"的纪律**删除**。
+        //   代价为零（错包名本来就不命中），但留着会让下一个人以为它是核实过的。
     )
 
     /**

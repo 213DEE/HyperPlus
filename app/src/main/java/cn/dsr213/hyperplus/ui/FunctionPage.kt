@@ -1,17 +1,12 @@
 package cn.dsr213.hyperplus.ui
 
-import android.content.Context
 import androidx.compose.runtime.Composable
 import androidx.compose.runtime.collectAsState
 import androidx.compose.runtime.getValue
-import androidx.compose.ui.platform.LocalContext
 import androidx.compose.ui.res.stringResource
 import cn.dsr213.hyperplus.AppPrefs
-import cn.dsr213.hyperplus.ModuleLink
 import cn.dsr213.hyperplus.R
-import cn.dsr213.hyperplus.RotateMode
 import top.yukonga.miuix.kmp.basic.Scaffold
-import top.yukonga.miuix.kmp.basic.TopAppBar
 import top.yukonga.miuix.kmp.preference.ArrowPreference
 
 /**
@@ -34,23 +29,30 @@ import top.yukonga.miuix.kmp.preference.ArrowPreference
  * ⚠️ 它只给**一句话**摘要，不留任何读数 —— 读数全部住在「设置 → 当前状态 / 诊断」，
  *   两处显示同一件事只会让两边都对不上（那正是旧版一个大页面最糟的地方）。
  *
- * 顶栏用 [TopAppBar]（大标题版）而不是 `SmallTopAppBar`：
- *   HyperOS 的原生应用首页就是大标题 + 副标题，二级页才用小标题 —— 这个形状本身就在告诉用户
+ * ============================ 顶栏：自建薄顶栏（2026-10-06）============================
+ * 顶栏是**大标题**（首页感），二级页才用小标题 —— 这个形状本身就在告诉用户
  *   "你在首页"还是"你在里面"。
- * ⚠️ **刻意不传 `scrollBehavior`**：库的折叠顶栏要配 `MiuixScrollBehavior` +
- *   `nestedScroll` + 把 `heightOffsetLimit` 设对（官方示例用了三个自定义工具函数才拼起来，
- *   见 `_probe/miuix_ex/utils/`）。不传时标题钉在展开态，代价只是"滚下去标题不会缩小"，
- *   而换来的是一处**不需要跟着库版本走**的稳定代码。这个取舍记在
- *   `docs/UI重构_液态玻璃_2026-09-29.md`。
+ * ★★ 但它**不再用库的 `TopAppBar`**，改用 `UiCommon.kt` 里的 [HomeTopBar]（自建外壳）。
+ *   原因（用户原话「**顶栏太厚了，都快占整个屏幕的五分之一了**」）：
+ *   库的 `TopAppBar` **16 个公开参数里没有一个是高度**（javap 反查签名证实），
+ *   且它**恒加** `CollapsedHeight`(52dp) ＋ 底部 `SubtitleBottomPadding`(8dp) —— 那 60dp
+ *   是给「滚动折叠」预留的，而我们**刻意不接滚动折叠**（见下）⇒ 纯属白占。
+ *   ⇒ 自建后 `状态栏 + 6 + 大标题行 + 版本号行 + 8`，**净降 46dp**，
+ *     而**版本号照旧显示**（用户 10-06 点名「不是版本号的问题，把版本号加回来」）。
+ *   ⛔ 别退回库的 `TopAppBar` —— 那会让白占的 60dp 原样回来。
+ *   ⛔ 也别去动库的 `titlePadding`：反查确认它是**水平**内边距（与 `NavigationIconPadding` /
+ *     `ActionIconPadding` 同组，后两者只能是左右方向），改它只挪左右缩进、**不降高度**。
+ *     当年《UI 优化规划》里"调 padding 可省 ≤10dp"的说法是错的，已当场更正（见该文档 §3.4）。
+ * ⚠️ **仍然不接滚动折叠**：库的折叠要配 `MiuixScrollBehavior` + `nestedScroll` +
+ *   把 `heightOffsetLimit` 设对（官方示例用了三个自定义工具函数才拼起来，
+ *   见 `_probe/miuix_ex/utils/`）。代价只是"滚下去大标题不会缩小"，
+ *   换来的是一处**不需要跟着库版本走**的稳定代码。取舍记在
+ *   `docs/UI重构_液态玻璃_2026-09-29.md`；自建之后这条更彻底 —— 连库都不依赖了。
  */
 @Composable
 internal fun FunctionPage(
+    /** 版本号 —— 顶栏副标题那行 `HyperPlus <版本号>` 用它，来源是 `BuildConfig.VERSION_NAME`。 */
     appVersion: String,
-    /** 状态是否已至少读过一次（决定显示"正在读取"还是真状态） */
-    probed: Boolean,
-    /** 引擎是否在线（心跳够新鲜） */
-    hosted: Boolean,
-    hostState: ModuleLink.State?,
     onOpen: (Route) -> Unit,
 ) {
     // ★ 读的是**内屏**那一份真身（2026-09-29 起只剩这一份）：
@@ -62,14 +64,19 @@ internal fun FunctionPage(
     //   它搬到了名单内容块自己的说明卡里（见 [AppWhitelistSection]），
     //   在那里离开关更近、更容易看懂。
     val modeInner by AppPrefs.modeInner.collectAsState()
-    val ctx = LocalContext.current
+    // ★ 2026-10-04：分屏入口的摘要要报**当前取值**（"2分屏展开方向：朝左"），
+    //   与上面那条旋转摘要同一个形状 —— 主页只给"一眼摘要"，细节在它自己的二级页里。
+    val splitDir by AppPrefs.splitUnfoldDir.collectAsState()
+    // ⚠️ `ctx` / `splitOn` 这两个局部值已随「引擎状态格」一起搬去 [SettingsPage]（2026-10-06）——
+    //   它们只服务那一格（读 `Settings.Global` 判断分屏开没开），本页不再需要。
+    //   ⛔ 别在这里重新算一遍：凡是"引擎现在算不算开着"的判断**只允许有一处**。
 
     Scaffold(
         topBar = {
-            TopAppBar(
+            // 自建薄顶栏（2026-10-06）。⚠️ 副标题是「应用名 + 版本号」，两者都不本地化
+            // ⇒ 直接拼字符串，不走资源。理由见 [HomeTopBar] 的 KDoc 与函数头注释。
+            HomeTopBar(
                 title = stringResource(R.string.function_title),
-                largeTitle = stringResource(R.string.function_title),
-                // ⚠️ 副标题是「应用名 + 版本号」，两者都不本地化 ⇒ 不用资源拼接
                 subtitle = "HyperPlus $appVersion",
             )
         },
@@ -83,17 +90,28 @@ internal fun FunctionPage(
             //   见他原话之前的样子是「设置 → 关于 → 捐赠支持 → 弹窗」，点三层才看得到码。
             DonateCard()
 
-            // ------------------------------------------------ 引擎状态（一行摘要 → 当前状态页）
-            SectionCard {
-                ArrowPreference(
-                    title = engineHeadline(ctx, probed, hosted, hostState),
-                    summary = engineOneLiner(ctx, probed, hosted, hostState),
-                    onClick = { onOpen(Route.Status) },
-                )
-            }
+            // ------------------------------------------------ 引擎状态格 · **已搬走**（2026-10-06）
+            //
+            // 🔴 用户原话：「**把功能首页的「运行中」挪进设置**」⇒ 整格搬到 [SettingsPage] 顶部。
+            // ★ 它为什么曾经在这里、又为什么该走：
+            //   它曾是本页**唯一**的"仪表盘"元素，理由是"引擎在不在，决定下面所有入口点进去
+            //   能不能真的改到东西"。但这句话对**目录层**并不成立 —— 用户是来点功能的，
+            //   不是来看心跳的；而"改的东西会不会生效"这件事，在「设置」页里回答更自然
+            //   （那一页本来就有配置通道警告与权限管理入口）。
+            // ⇒ 本页现在**只剩目录**：捐赠卡 ＋ 两个域 ＋ 实验。
+            //   ⛔ 别把状态格加回来 —— 那会让这一页重新混进"仪表"这件不属于目录层的事。
+            //   ⚠️ 那三个私有函数（engineHeadline / moduleOneLiner / enabledSummary）
+            //     也一并搬去 [SettingsPage] 了，本文件**一个都不剩**。
 
-            // ------------------------------------------------ 旋转
-            SectionCard(title = stringResource(R.string.function_section_rotation)) {
+            // ------------------------------------------------ 系统增强（旋转 + 分屏，2026-10-04 合并）
+            //
+            // ★★ 用户 2026-10-04 晚点名：「旋转和分屏都是系统增强，这两个小标题合并成一个
+            //   「系统增强」小标题」。
+            //   ⇒ 两个 `SectionCard` 合成一个，两个入口行**顺序不变**（旋转在前、分屏在后）。
+            //   ⚠️ 合并的只是**小标题**：两条入口仍然各自指向自己的二级页，别顺手把它们也并了 ——
+            //     旋转管"屏幕转多少度"、分屏管"窗口怎么分"，是两件独立的事
+            //     （理由见 [SplitScreenPage] 类注释里那段"别塞进旋转页"）。
+            SectionCard(title = stringResource(R.string.function_section_system)) {
                 // ★ 2026-10-01：下面**原本还有一条「应用名单」入口**，已删除 ——
                 //   那一页合并进「旋转增强」了。⇒ **这一行摘要现在是用户唯一能知道
                 //   "应用名单去哪了"的地方**，所以它必须点名提到应用名单，
@@ -110,6 +128,17 @@ internal fun FunctionPage(
                         stringResource(modeInner.labelRes),
                     ),
                     onClick = { onOpen(Route.Rotation) },
+                )
+                // ★ 分屏入口（2026-10-04 新增）：位置紧跟在"旋转"之后。
+                //   ⚠️ 摘要报的是当前取值（朝左 / 朝右），不是"点进去能改什么" ——
+                //     与上一条旋转摘要一致：**主页只给状态，不给说明书**。
+                ArrowPreference(
+                    title = stringResource(R.string.function_split_title),
+                    summary = stringResource(
+                        R.string.function_split_summary,
+                        stringResource(splitDir.labelRes),
+                    ),
+                    onClick = { onOpen(Route.SplitScreen) },
                 )
             }
 
@@ -145,66 +174,4 @@ internal fun FunctionPage(
             //   不写下来的话，下一个人很可能顺手就把新功能的开关堆回这一页。
         }
     }
-}
-
-/**
- * 状态头条 —— 一句话说清旋转服务现在**在不在**。
- *
- * ⚠️ 全量梳理（2026-09-30）：这里原来叫"引擎"，而且「读不到引擎」「引擎已离线」都是
- *   开发者视角的说法。改成"旋转服务"之后，**四句话的意思一个都没动**，只是换了个
- *   用户能立刻对上的主语 —— 界面别处提到同一件事时也必须用这个词（见 [engineOneLiner]）。
- */
-private fun engineHeadline(
-    ctx: Context,
-    probed: Boolean,
-    hosted: Boolean,
-    hs: ModuleLink.State?,
-): String = when {
-    !probed -> ctx.getString(R.string.function_state_probing)
-    hs == null -> ctx.getString(R.string.function_state_noservice)
-    !hosted -> ctx.getString(R.string.function_state_offline)
-    else -> ctx.getString(R.string.function_state_running)
-}
-
-/**
- * 状态副标题 —— 一句人话，说明**为什么是上面那个结果**、以及**现在在干什么**。
- *
- * ⚠️ 措辞只讲能确证的事：心跳来自旋转服务单方面上报（见 `ModuleLink`），
- *   所以"离线"能确定是"心跳过期"，但**不能**由此推断它"死了" ——
- *   系统界面重启后它会自己回来，文案里明说了这一点，避免用户白折腾。
- */
-private fun engineOneLiner(
-    ctx: Context,
-    probed: Boolean,
-    hosted: Boolean,
-    hs: ModuleLink.State?,
-): String = when {
-    // ⚠️ 2026-10-02 全量精简：原文「旋转服务常驻在系统界面进程里，本界面只负责显示它回传的
-    //   状态」是**进程实现**（它住哪个进程、谁给谁回传），用户不关心；上面那行大字已经说了
-    //   "正在读取运行状态…"，这里只需把当下这件事再说一遍。
-    !probed -> ctx.getString(R.string.function_state_probing_long)
-    hs == null ->
-        // ⚠️ 2026-10-02 精简：砍掉"旋转服务只在系统界面进程里运行"（进程实现）——
-        //   那句唯一对用户有用的推论（"没有它只能保存设置、转不动屏幕"）已并进括号。
-        ctx.getString(R.string.function_no_report)
-    !hosted ->
-        // ⚠️ 2026-10-03 多语言时发现这里原来是**三段**拼接，其中"（超过 N 秒视为离线）；"
-        //   那一段一度被漏掉 —— 合成一条资源之后这类"拼接漏段"不会再发生。
-        ctx.getString(
-            R.string.function_lost,
-            hs.heartbeatAgoSec,
-            ModuleLink.HOST_LOST_AFTER_SEC,
-        )
-    hs.mode == RotateMode.SYSTEM.name -> ctx.getString(R.string.function_mode_system)
-    // ★ 未生效时**必须说清原因**（2026-09-29 修）：旧文案一律写"可能缺「修改系统设置」授权"，
-    //   而 `takeover=false` 最常见的情形其实是「当前应用在名单里」——
-    //   那是**按设计**让位，不是故障。两种情形分开说，判据见 [takeoverNote]。
-    !hs.takeover -> takeoverNote(ctx, hs) ?: ctx.getString(R.string.function_not_active)
-    hs.mode == RotateMode.SEMI.name ->
-        semiStatusText(ctx, hs.semiShown, hs.semiTapped, hs.overlayOk, hs.overlayType)
-    hs.rotation < 0 -> ctx.getString(R.string.function_await_first)
-    // ⚠️ 原来的 "　状态机 ${hs.decider}" 已删（2026-09-30 文案梳理）：
-    //   `STABLE` / `SETTLING` 这类内部状态机名对用户没有任何可操作性，
-    //   摆在首屏只会让人以为出了问题。需要它的是「诊断」页，那里有完整读数。
-    else -> ctx.getString(R.string.ro_rotation, rotName(ctx, hs.rotation))
 }

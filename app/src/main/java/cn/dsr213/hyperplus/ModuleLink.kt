@@ -2,6 +2,7 @@ package cn.dsr213.hyperplus
 
 import android.content.Context
 import android.os.SystemClock
+import android.provider.Settings
 import android.util.Log
 
 /**
@@ -105,10 +106,11 @@ object ModuleLink {
         /**
          * 停手是**哪一条豁免**造成的。
          *
-         * 取值 = `WHITELIST`（在豁免名单里）/ `UNCONTROLLABLE`（实测写过方向、屏幕没动）；
-         * **空串 = 此刻没在停手**。
-         * ⚠️ 2026-09-29 删掉两个取值（`OUTER_DESKTOP` / `OUTER_DECLARED`）—— 外屏的旋转
-         *   增强整个删了，"外屏专属豁免"没有下游。⛔ 别再补回来。
+         * 取值 = `WHITELIST`（在豁免名单里）；**空串 = 此刻没在停手**。
+         * ⚠️ 删过的取值（⛔ 别再补回来）：
+         *   - 2026-09-29 的 `OUTER_DESKTOP` / `OUTER_DECLARED`（外屏旋转增强整体删除，
+         *     "外屏专属豁免"没有下游）；
+         *   - 2026-10-05 的 `UNCONTROLLABLE`（实测转不动 ⇒ 改成弹一次提示，**不再停手**）。
          *
          * ★ 引擎 2026-09-29 起就在报这一格（`fgstop`，见 [cn.dsr213.hyperplus.module.EngineHost]），
          *   但 App 侧**一直没解析** —— 后果是界面只知道"停手了"、说不出"谁让它停的"，
@@ -161,6 +163,23 @@ object ModuleLink {
         val calibOffsetDeg: Float,
         val sensorAvailable: Boolean,
         val writeGranted: Boolean,
+        /**
+         * 这次状态报告里**到底有没有「修改系统设置」这一项**（`grant` 键在不在）。
+         *
+         * ★ 为什么必须和 [writeGranted] 分开（2026-10-05，外部用户实测报障）：
+         *   [writeGranted] 把「键不存在」与「键 = 0」压成同一个 `false`，界面于是把
+         *   **没读到**说成了**缺失** —— 用户看到「修改系统设置：缺失」，跑去系统设置里找
+         *   本应用，**根本找不到**（清单刻意没声明那个权限，见 `PermissionsPage` 的类注释）。
+         *   而实测的真相是：`com.android.systemui` 的 `WRITE_SETTINGS` 是
+         *   `granted=true`（`android.uid.systemui` 自带）⇒ 那一格红字**不是权限问题**，
+         *   是引擎没在跑、状态串里没这一项。
+         *   ⇒ 三态：**没这一项 = 未读到**（≠ 缺失）；有且为 1 才是拿到了；
+         *     有但为 0 才是真的异常。
+         *
+         * ⚠️ 做法与 [cfgOk] 同源 —— 那个也用「本次状态里没有这一项」表达"不知道"，
+         *   而不是假装它是坏的。
+         */
+        val grantReported: Boolean,
         val lastOpenMs: Long,
         /**
          * 宿主引擎**实时**已运行秒数。
@@ -302,7 +321,63 @@ object ModuleLink {
         return CalibStatus.TIMEOUT
     }
 
+    /**
+     * 一次「已经到多分屏上限了」的回报（A4，2026-10-05）。
+     *
+     * @param stampMs 引擎判定到顶的时刻（**不是**我们读它的时刻）
+     * @param count 当时已有的格数
+     * @param max 上限格数（**引擎实测的那个数**，见 `SplitTrigger.maxStagesOrNull`）
+     */
+    data class SplitLimit(val stampMs: Long, val count: Int, val max: Int)
+
+    /**
+     * 读「到上限」提示（[PrefsBridge.SPLIT_BUS_LIMIT] 的解析结果）。
+     *
+     * ★★ 它**没有**配对 token（旧「折角校准结果」那种严格配对已随校准下线）——
+     *   因为这条提示是**引擎主动推**的（不是"用户发起、引擎应答"）。
+     *   ⇒ 判新旧只能靠**时间戳本身**：调用方拿到后自己决定"这条是不是我还没提示过的"
+     *   （见 `SplitEnhancePage` 里那个 `lastLimitStamp`）。
+     *
+     * @return null = 没有这条记录（引擎从没报过到顶）
+     */
+    fun readSplitLimit(ctx: Context): SplitLimit? {
+        val raw = PrefsBridge.readString(ctx.contentResolver, PrefsBridge.SPLIT_BUS_LIMIT)
+            ?: return null
+        val f = raw.split('|')
+        if (f.size < 3) return null
+        val stamp = f[0].toLongOrNull() ?: return null
+        val count = f[1].toIntOrNull() ?: return null
+        val max = f[2].toIntOrNull() ?: return null
+        if (stamp <= 0L || max < 2) return null
+        return SplitLimit(stamp, count, max)
+    }
+
     // ================================================================ 状态读取
+
+    /**
+     * 分屏触发器的档位（0 关 / 1 只观察 / 2 真动作）；读不到按 **0**（= 关）。
+     *
+     * ★ 为什么 App 能读：它住在 `Settings.Global`（[PrefsBridge.SPLIT_TRIGGER]），
+     *   而**读**系统设置零权限（只有写非公开键才受限，见 [PrefsBridge] 类注释）。
+     *
+     * ★ 为什么要读它：主页那条状态行的主语是**整个模块**（用户 2026-10-04 点名：
+     *   「运行中改成整个模块的运行状态显示，不要再只显示旋转增强」），
+     *   而"现在启用了哪些增强"必须知道分屏这一档 —— 旋转那一档在 AppPrefs 里。
+     *
+     * ⚠️ 它是**启动时读一次**的开关（引擎侧 `SplitTrigger.install` 只读一次，
+     *   改了要重启系统界面才生效）⇒ 界面把它说成"已开启"，⛔ 别说成"正在运行"。
+     */
+    fun splitTriggerMode(ctx: Context): Int = runCatching {
+        Settings.Global.getInt(ctx.contentResolver, PrefsBridge.SPLIT_TRIGGER, 0)
+    }.getOrDefault(0)
+
+    /**
+     * [splitTriggerMode] 的取值之一：**真动作**（判定成立时真的会让屏幕分成两半）。
+     *
+     * ⚠️ 另外两档（0 = 关 / 1 = 只观察）**界面用不着**，所以只把这一档提出来 ——
+     *   界面唯一要回答的问题是"分屏增强算不算已开启"，而只有 2 档算。
+     */
+    const val SPLIT_TRIGGER_ACT = 2
 
     /**
      * 纯读一眼宿主留下的状态（**不探活**，两次 `Settings` 读 + 解析，可在主线程调用）。
@@ -380,6 +455,9 @@ object ModuleLink {
                 calibSign = kv["sign"]?.toIntOrNull() ?: 1,
                 calibOffsetDeg = kv["offset"]?.toFloatOrNull() ?: 0f,
                 sensorAvailable = kv["sensor"] == "1",
+                // ★ 三态判据：`grant` **键在不在**，而不是它的值。
+                //   ⛔ 别把它并回上面那一行：键不存在时它是"未读到"，不是"缺失"（见 [State.grantReported]）。
+                grantReported = kv.containsKey("grant"),
                 writeGranted = kv["grant"] == "1",
                 lastOpenMs = kv["openMs"]?.toLongOrNull() ?: -1L,
                 // ★ 优先用 startedAt 现算（实时、准确）；拿不到才退回快照值（老格式兜底）

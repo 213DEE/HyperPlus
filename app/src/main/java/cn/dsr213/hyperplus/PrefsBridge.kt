@@ -14,9 +14,9 @@ import android.util.Log
  *
  * | 组 | 谁写 | 谁读 | 走哪 |
  * |---|---|---|---|
- * | **配置键** [MODE_INNER] [STRATEGY] [HANDOFF_ROTATE] [GATE] [CALIB_REQ] [HINT_TEST] [WHITELIST_ADD] [WHITELIST_REMOVE] | App | 引擎 | App 的 prefs ⇒ **广播快照**（本类只借用键名常量） |
+ * | **配置键** [MODE_INNER] [STRATEGY] [HANDOFF_ROTATE] [GATE] [CALIB_REQ] [HINT_TEST] [WHITELIST_ADD] [WHITELIST_REMOVE] [SPLIT_UNFOLD_DIR] [SPLIT_WHITELIST_ADD] [SPLIT_WHITELIST_REMOVE] | App | 引擎 | App 的 prefs ⇒ **广播快照**（本类只借用键名常量） |
  * | **引擎的账** [SIGN] [OFFSET] [RESTORE] [TAKEOVER] [CAMID] | 引擎 | 两边 | `Settings.System`（引擎是特权包，直写免 root） |
- * | **状态键** [STATE] [HEARTBEAT] [CALIB_RESULT] | 引擎 | App | `Settings.System` |
+ * | **状态键** [STATE] [HEARTBEAT] [CALIB_RESULT] [SPLIT_BUS_LIMIT] | 引擎 | App | `Settings.System` |
  *
  * ★ 为什么不把"引擎的账"也塞进 prefs：**引擎写不了 App 的私有文件**（跨 uid，DAC + SELinux
  *   双重拦截）。而它写 Settings 是免 root 的（SystemUI 命中特权包豁免），
@@ -92,6 +92,22 @@ internal object PrefsBridge {
     const val GATE = "gate_enabled"
 
     /**
+     * ★★★ **自适应「读不到环境」时临时降级半自动**（2026-10-05 新增，R1）—— 用户配置。
+     *
+     * `true`（出厂默认）= 自适应连续几轮读不到人脸时，**临时**改按半自动干活（弹按钮），
+     * 环境一恢复立刻切回自适应；`false` = 自适应永远按自适应跑，读不到就什么都不做。
+     *
+     * ★ 为什么默认 `true`：暗光 / 没把脸对着镜头时，自适应的表现是
+     *   「**转手机完全没反应**」—— 用户分不清"功能坏了"和"环境不允许"。
+     *   降级之后至少弹得出按钮，点一下就能转 ⇒ 这个方向的错法代价小得多。
+     * ★ 降级只改**引擎这一次的行为**，一个字都不动用户配的那一档
+     *   （见 `AdaptiveEngine.mode`；⛔ 别把它实现成"偷偷改用户的配置"）。
+     * ★ 引擎侧要读它 ⇒ **两条读盘路径都要灌**（App prefs / 引擎镜像），
+     *   漏一条就是"界面改了、引擎没跟上"。
+     */
+    const val ADAPTIVE_FALLBACK = "adaptive_fallback"
+
+    /**
      * ★ **实验功能总闸**：`true` = 用户在「实验功能」页里打开了「自适应旋转」。
      *
      * 用户 2026-10-03 点名（原话：「在首页新增一个"实验功能"置底，里面添加"自适应旋转"开关，
@@ -111,6 +127,153 @@ internal object PrefsBridge {
      *   它出现在这里是因为 App 的 prefs 文件是唯一的配置落盘处，不是因为它跨进程。
      */
     const val EXPERIMENTAL_ADAPTIVE = "experimental_adaptive"
+    /**
+     * ★★ 「**提高分屏上限**」总闸（2026-10-06，用户点名）。
+     *
+     * 默认 **false**（关）：折叠分屏的上限**保持系统原样**（本机 = 6 个）。
+     * 打开后上限抬到 **8**，但 ⚠️ **要重启一次系统界面才生效**。
+     *
+     * ★ 为什么必须「重启才生效」（不是偷懒）：`MultipleSplitOrganizer.MAX_STAGES` 是
+     *   `<clinit>` 里**一次算出来**的静态字段，`allStages` 列表也是那一刻按它建好的
+     *   ⇒ 运行时热改不了（详见 `module/SplitStageLimit` 的类注释）。
+     *
+     * ⚠️ 与 [EXPERIMENTAL_ADAPTIVE] 的语义**不同**（别抄错）：
+     *   那个只管「界面上列不列出来」，不参与引擎判断；
+     *   这一个**真的会改系统行为**（分屏格数）⇒ 它关着的时候
+     *   `SplitStageLimit` **一个字节都不许改**（判据见 `SplitStageGate.targetStages`）。
+     */
+    const val EXPERIMENTAL_MULTISPLIT = "experimental_multisplit"
+
+    /**
+     * ★★★ **「提高分屏上限」的 `persist.*` 属性镜像**（2026-10-06 新增）。
+     *
+     * 完整名 = `persist.sys.hyperplus.multisplit`。取值 `"1"` / `"0"`；**键不存在** = 没写过。
+     *
+     * ============================ 它为什么必须存在 ============================
+     * 在这条属性之前，引擎（SystemUI 进程）想读 [EXPERIMENTAL_MULTISPLIT] 只有
+     * [MIRROR]（`Settings.System`）一条路。真机实测（2026-10-06 08:01:49，逐条日志）：
+     *
+     * | 时刻 | 事实 |
+     * |---|---|
+     * | Δ380 ms | `MultipleSplitOrganizer.<clinit>` 拦到 `resolveMaxStages` ← **截止线** |
+     * | Δ404 ms | `MultipleSplitStageOrderOperator.<init>` 跑完，`allStages` 已按 6 建好 |
+     * | Δ25 ~ Δ4737 ms | 配置镜像**读了 51 次，全是空** |
+     * | Δ4987 ms | 才第一次读到开关 |
+     *
+     * ⇒ **截止线在 Δ404 ms，值 Δ4.6 s 才到，晚了 4.2 秒**。根因不是「数据没写进去」
+     *   （库里那份镜像一直在：760 字符 / 26 个键），而是 `Settings.System` 要走
+     *   ContentProvider（Binder），SystemUI 进程刚起来的头几秒就是拿不到值。
+     *
+     * ⇒ `persist.*` 属性活在**进程内 mmap 的属性区**：不经过 Binder、不经过
+     *   ContentProvider、不等用户解锁 ⇒ **进程起来的第一个毫秒就能读**。
+     *   相对 Δ380 ms 的截止线有足够余量。
+     *
+     * ============================ 四条纪律 ============================
+     * ① 由 **App 借 root** 写（[cn.dsr213.hyperplus.RootShell.putProp]）——
+     *    `persist.` 属性只有 root / init 能设。⛔ 别指望 App 侧零权限能写它。
+     * ② 引擎侧**只读不写**（SystemUI 的 SELinux 域不保证能写 `persist.sys.*`）。
+     * ③ ⛔ **绝不与 ROM 自己的 `persist.sys.multiple.split.max_stages` 混用** ——
+     *    那是小米的键，改它会被 ROM 自己的档位逻辑反向利用（实测把它设成 8 会连崩三次，
+     *    见 `docs/分屏增强_上限限制点位_字节码结论_2026-10-06.md`）。
+     *    本键是我们**自己的命名空间**，只表达「用户开关是开是关」这一件事。
+     * ④ 它**不是** [MIRROR] 的替代品，而是**优先级更高的第一条通道**：属性没写过时，
+     *    引擎仍回落去读 [MIRROR]（判据见
+     *    [cn.dsr213.hyperplus.SplitStageGate.targetStages] 的优先级表）。
+     *
+     * ⚠️ `persist.` 属性**跨整机重启存活**（这正是我们要的），代价是
+     *   **App 卸载后会残留** ⇒ 极端情形下用户可
+     *   `setprop persist.sys.hyperplus.multisplit 0` 手工清掉（本工程的用户必是 root 用户）。
+     */
+    const val PROP_MULTISPLIT = "persist.sys.hyperplus.multisplit"
+
+    /**
+     * ★★ 「**2 分屏展开方向**」—— 用户 2026-10-04 点名的选项（原话：
+     *   「直接在 app 里面给选项「2 分屏展开方向：朝左 / 朝右」」）。
+     *
+     * ============================ 它定义的是什么 ============================
+     * 轻折一下追加一格分屏时，**当前应用留在哪一侧**（另一侧才是新格）。
+     *
+     * ★ 这条语义**不是我们发明的**：原生「三指左滑 / 三指右滑」本来就是两个**独立的手势类**
+     *   （`MiuiThreeFingerHorizontalGesture$…LTRGesture` / `…RTLGesture`，动作串
+     *   `split_ltr` / `split_rtl`，✅ 反汇编级实证见
+     *   `docs/分屏增强_实现方案_2026-10-04.md` §1.10）⇒ **方向是系统的一等输入量**，
+     *   原生只是把它绑在"往哪边滑"上，我们把同一个量提到设置里来。
+     *
+     * ⛔ **别把它与屏幕旋转方向混起来** —— 那个是 [KEY_USER_ROTATION_PREFIX]
+     *   （`user_rotation_*`，管屏幕转多少度）。两者只是名字里都带"方向"，语义毫无关系。
+     *
+     * ⚠️ 取值用**枚举名**（`LEFT` / `RIGHT`），与 [MODE_INNER] / [STRATEGY] 同一条落盘约定。
+     * ⚠️ 引擎侧**要读它**（分屏触发时要用；现在只是先把界面摆上）⇒ 必须同时进
+     *   `AppPrefs.reloadFromPrefs`（App 进程）与 `AppPrefs.applyFromModulePrefs`（引擎进程）
+     *   两条读盘路径。漏一条的症状是「界面改了、引擎那边没跟上」，而且**不报错**。
+     */
+    const val SPLIT_UNFOLD_DIR = "split_unfold_dir"
+
+
+
+    /**
+     * ★★ **多分屏的高温保护阈值**（摄氏度，**整数**；2026-10-05 新增）—— 用户配置。
+     *
+     * 用户原话：「在app里添加修改温度上限的输入框，**禁止超过60度**，并用**红字**标注警告
+     * "该操作存在风险，请谨慎修改"，下面要配一个**恢复默认**的按钮」。
+     *
+     * ============================ 它改的是什么 ============================
+     * 系统有一条**高温自动收掉多分屏**的保护（`MultiTaskingTemperatureObserver`）：
+     * 板温（`/sys/class/thermal/thermal_message/board_sensor_temp`）爬到 **47°C** 就
+     * 弹一个引导对话框，并把"退出多分屏"排进 10 秒后的队列；回落到 **45°C** 才复位
+     * （回滞 2°C，见 `MultiTaskingTemperatureObserver.HIGH_TEMPERATURE / NORMAL_TEMPERATURE`）。
+     *
+     * ★★ 更关键的是：**它同时是对"加一格"的一道闸** —— `dockMultipleTasks()` /
+     *   `dockSoScTasks()` 的第一件事就是 `if (isHighTemperature()) { toast; return; }`
+     *   ⇒ 板温超过这个阈值时，"轻折一下多一格"**当场被拒**（弹
+     *   `multi_tasking_temperature_block_toast`）。这就是用户想调它的动机。
+     *
+     * ⇒ 本键让用户把这个 **47** 改掉。引擎侧看到的写法是**改写
+     *   `MultiTaskingTemperatureObserver.mIsHighTemperature` 这个字段**
+     *   （而不是改那个 `static final` 常量 —— 它的值已被内联进调用点，改字段无效）。
+     *
+     * ============================ 取值边界（⛔ 必须在三处一致） ============================
+     * - 默认 **[THERMAL_LIMIT_C_DEFAULT] = 47**（**照抄系统的出厂值**，不是我们拍的）。
+     * - 下限 **[THERMAL_LIMIT_C_MIN] = 40**：必须**明显高于日常板温**（本机实测 36°C）
+     *   —— 阈值一旦落到常温之下，高温判定就**永远不触发**，
+     *   那等于一条**不经过二次确认弹窗**的关保护路径。
+     *   ⚠️ 这个数被单测改过一次（原为 30，低于实测板温 36）：
+     *   见 `AppPrefs.THERMAL_LIMIT_C_MIN` 的 KDoc。
+     * - 上限 **[THERMAL_LIMIT_C_MAX] = 60** —— **用户点名的硬顶**（原话「禁止超过60度」）。
+     *   ★ 这道顶不只是"用户说了算"：60°C 已经远超手机的舒适区（本机日常实测 36°C，
+     *   出厂阈值 47°C），再往上调**大概率在触发前系统自己就降频/关屏了**，
+     *   那个输入框会变成一个"看起来能调、其实调了没用"的摆设。
+     *
+     * ⚠️ **引擎侧要读它** ⇒ 必须同时进 `AppPrefs.reloadFromPrefs`（App 进程）与
+     *   `AppPrefs.applyFromModulePrefs`（引擎进程）两条读盘路径。漏一条的症状是
+     *   「界面改了、引擎那边没跟上」，而且**不报错**。
+     */
+    const val SPLIT_THERMAL_LIMIT_C = "split_thermal_limit_c"
+
+    /**
+     * ★★ **关掉多分屏的高温保护**（布尔；2026-10-05 新增）—— 用户配置，**默认 false**。
+     *
+     * 用户原话：「再加一个**关闭过热保护的开关**，加一个**二次确认弹窗**，弹窗里面写清楚
+     * **关闭过热保护可能造成不可逆的风险**」。
+     *
+     * ============================ 它和上一条的区别 ============================
+     * [SPLIT_THERMAL_LIMIT_C] 是"把闸门抬到多高"，本键是"**把闸门整个拆掉**"。
+     * 两者是**独立**的两个手段（抬到 60 仍然会拦；关掉则不再看温度）——
+     * ⛔ 别把它们合并成一个语义（例如"关掉时把阈值置 0"）：那样界面上两个控件会互相打架，
+     *   而且用户关掉又打开时**找不回**他自己调过的那个数。
+     *
+     * ============================ 它做了什么 ============================
+     * 引擎侧让 `mIsHighTemperature` **恒为 `false`** ⇒ `onHighTemperature()` 那条链
+     * （引导对话框 + 10 秒后 `exitMultipleSplit`）与"加一格"路上那道高温闸**同时失效**。
+     *
+     * 🔴 **这是本模块里唯一一处"拆掉厂商安全保护"的开关** ——
+     *   不可逆风险（电池/主板长期高温）真实存在，所以界面必须有二次确认，
+     *   且弹窗正文要把风险写清楚（见 `split_thermal_off_dlg_msg` 三套资源）。
+     *   ⛔ 别在任何地方把它默认打开、也别做"记住上次选择"的免确认。
+     *
+     * ⚠️ 与上一条同源：**引擎侧要读它** ⇒ 两条读盘路径都要灌，见 [SPLIT_THERMAL_LIMIT_C]。
+     */
+    const val SPLIT_THERMAL_GUARD_OFF = "split_thermal_guard_off"
 
     /**
      * ★ 半自动按钮的**等待时长**（毫秒）。用户 2026-09-28 点名要的可调项：
@@ -130,7 +293,7 @@ internal object PrefsBridge {
      *   只能靠人把手机转一下。调一次外观要转一次手机，这不可接受。
      *
      * ⇒ 约定：值形如 `"<时间戳>|<目标方向>"`，App 点一下写一个新值，引擎读到"值变了"就
-     *   **直接弹一次按钮**（存活时长照 [HINT_MS]）。与 [CALIB_REQ] / [UNCONTROLLABLE_CLEAR]
+     *   **直接弹一次按钮**（存活时长照 [HINT_MS]）。与 [CALIB_REQ]
      *   同一个套路：靠"值变了"驱动，不复位（引擎写不了 App 的私有文件）。
      *
      * ⚠️ 它**只影响外观验证**：弹出来的按钮点下去照样走真实路径（写方向 + 读回），
@@ -163,6 +326,61 @@ internal object PrefsBridge {
     const val WHITELIST_REMOVE = "app_whitelist_remove"
 
     /**
+     * ★★★ **「每个应用单独适配」的旋转方式**（2026-10-05 新增）—— 用户配置。
+     *
+     * 用户原话（2026-10-05）：「应用列表「**每个应用单独适配**」（跟随全局 / 跟随系统 /
+     * 自适应 / 半自动）」。
+     *
+     * 编码：`"<包名>=<枚举名>\n…"`（与 [AppWhitelist.encode] 同样用**单个字符串**，
+     * 理由逐字相同）。枚举见 `AppPrefs.AppRotateMode`。
+     *
+     * ============================ 它为什么只装 ADAPTIVE / SEMI ============================
+     * [[FOLLOW_GLOBAL]]（跟随全局）与 [[SYSTEM]]（跟随系统）**不进这个键** —— 它们由
+     * 「名单」那两份集合表达（[WHITELIST_ADD] / [WHITELIST_REMOVE]），
+     * 判据是"命中名单 ⇒ 跟随系统、否则 ⇒ 跟随全局"（见 `AppPrefs.appModeOf`）。
+     *
+     * ★ 为什么这样做：这两档**本来就是这个意思** —— 改造前那个布尔开关的"开"就是
+     *   「跟随系统」（名单命中）、"关"就是「跟随全局」。借道既有名单 ⇒ **老用户的勾零迁移**，
+     *   而且"谁不受控制"这件事仍然只有一个真值来源（[AppWhitelist.resolve]）。
+     *   ⛔ 别为了"四个档位整齐"把这两档也写进本键 —— 那会立刻造出两份互相打架的名单。
+     *
+     * ⚠️ 引擎侧**要读它**（前台应用取档）⇒ 必须同时进 `AppPrefs.reloadFromPrefs`（App 进程）
+     *   与 `AppPrefs.applyFromModulePrefs`（引擎进程）两条读盘路径。漏一条的症状是
+     *   「界面改了、引擎还按全局档走」，而且**不报错**。
+     */
+    const val APP_ROTATE_MODES = "app_rotate_modes"
+
+    // ------------------------------------------------ 分屏增强的应用名单（2026-10-05 新增）
+
+    /**
+     * ★★★ 分屏名单：**用户手动加进来**的包（`\n` 分隔的单个字符串，编码同 [AppWhitelist.encode]）。
+     *
+     * ============================ 它与 [WHITELIST_ADD] 是**两份不同的东西** ============================
+     * 用户 2026-10-05 拍板：「分屏这份名单和旋转那份**各自独立一份**」。
+     *
+     * | | 旋转名单（[WHITELIST_ADD]） | 分屏名单（本条） |
+     * |---|---|---|
+     * | 命中含义 | 本应用**不干涉那个应用的转屏** | 那个应用**折一下也不分屏** |
+     * | 默认清单 | 常见游戏 + 长视频 | **常见游戏**（见 `SplitWhitelist.DEFAULT_GAMES`） |
+     *
+     * ⚠️ **刻意不共用存储**：两者语义毫无关系 —— 用户完全可能"不想让某个游戏被切屏"
+     *   但"愿意让它自己转屏"。共用一份会让改一边、另一边莫名变化。
+     * ⛔ 别为了"少维护一份"把它们合并（用户已明确否决）。
+     *
+     * ★ 键名刻意**不带** `split_` 前缀之外的花样：沿用 `app_whitelist_*` 那套的
+     *   "`add` / `remove` 两份独立集合"范式（理由与 [WHITELIST_REMOVE] 注释里逐字相同）。
+     */
+    const val SPLIT_WHITELIST_ADD = "split_whitelist_add"
+
+    /**
+     * ★★★ 分屏名单：**用户手动移出**的包（独立减集，理由见 [WHITELIST_REMOVE]）。
+     *
+     * ⚠️ 必须是独立一份 —— 默认清单里的游戏是"装了就该默认不触发分屏"的，
+     *   只删加集的话，下一次现算又被默认值顶回来。
+     */
+    const val SPLIT_WHITELIST_REMOVE = "split_whitelist_remove"
+
+    /**
      * ★ 标定请求：App 写、引擎读，值是 `"<时间戳>|<步骤>"`（步骤见 `AppPrefs.CALIB_STEP_*`）。
      *
      * ⚠️ **刻意不复位**（旧实现是写 0 复位后反复触发）：配置通道的变更通知**不携带键名**，
@@ -170,24 +388,6 @@ internal object PrefsBridge {
      *   引擎靠"值变了"驱动，反而更干净 —— 不需要额外的复位握手。
      */
     const val CALIB_REQ = "calib_req"
-
-    /**
-     * ★ **清除「实测不可控」名单的请求**（App 写、引擎读）。
-     *
-     * ============================ 为什么要有这个键（跨进程的方向问题） ============================
-     * 名单本体存在 `Settings.System`（[Uncontrollable.KEY]），**只有引擎能写** ——
-     * App 的清单里没有 `WRITE_SETTINGS`（见 [PrefsBridge] 类注释：
-     * "往非公开键里写"只认 SYSTEM / SHELL / ROOT uid 与特权包）。
-     * 所以 App 侧那个"清除"按钮**不能直接删键**，只能走这条约定：
-     *
-     * ```
-     * App 点清除 ⇒ 往自己的 prefs 写一个新时间戳 ⇒ 引擎读到"值变了" ⇒ 引擎代删 Settings 键
-     * ```
-     *
-     * ★ 与 [CALIB_REQ] **同一个套路**：值本身就是"每次请求一个新高"，靠"变了"驱动，
-     *   不需要复位握手 —— 而复位恰恰做不到（引擎写不了 App 的私有文件）。
-     */
-    const val UNCONTROLLABLE_CLEAR = "uncontrollable_clear"
 
     /**
      * ★★ **熔断复位请求**（App 写、引擎读；2026-10-03 新增）。
@@ -204,22 +404,6 @@ internal object PrefsBridge {
      *   走这条路 App 零权限、零 root，却能让"最需要一键恢复"的场景真的可恢复。
      */
     const val BREAKER_RESET = "breaker_reset"
-
-    /**
-     * ★★ **实时角度预览**开关（App 写、引擎读；2026-10-01 新增）。
-     *
-     * 用户原话：「在方向校准里面加一个实时的角度显示，我告诉你正确方向」。
-     *
-     * 语义：界面打开「方向校准」时置 `true`、离开时置 `false`；引擎读到 `true` 就
-     * **持续开前摄采帧**，并把实时角度写到 [LIVE_ANGLE]。
-     *
-     * ⚠️ 与其他请求键（[CALIB_REQ] / [HINT_TEST]）**不同**，它是一个**状态**而不是
-     *   一次性请求 —— 所以引擎读它不需要"值变了"那套判据，直接跟着走即可。
-     *   但它必须**不跨进程启动存活**：预览只在"用户正盯着那一页"时有意义，
-     *   进程重启后还自动开相机是白耗电。两侧各自兜住这件事，见
-     *   `AppPrefs.init`（读盘时强制复位）与 `AdaptiveEngine.setAnglePreview`（首次只记账）。
-     */
-    const val ANGLE_PREVIEW = "angle_preview"
 
     // ---------------------------------------------------------------- 引擎的账（Settings）
 
@@ -285,6 +469,19 @@ internal object PrefsBridge {
     val MIRROR = PREFIX + "config_mirror"
 
     /**
+     * ★ **分屏触发器的档位**（0 关 / 1 只观察 / 2 真动作）。
+     *
+     * ============================ 它为什么在 `Settings.Global`，不在这份清单的其它两栏里 ============================
+     * 它既不是"用户在 App 里编辑的配置"（**分屏还没有界面开关**，现在是 adb 设的），
+     * 也不是引擎算出来的账 —— 它是一条**由人直接设进系统**的开关。
+     *
+     * ★ 真正的定义在 `module/SplitTrigger.KEY`，而它**直接引用这一条**（单一真值）。
+     *   留在这个类里是因为本类是"键名唯一真值处"（见类注释）。
+     * ⚠️ App 侧**读**它（主页要汇总"整个模块"启用了哪些增强），读 Global 零权限。
+     */
+    const val SPLIT_TRIGGER = PREFIX + "split_trigger"
+
+    /**
      * ★★★ **HyperOS「每块屏各自的方向槽位」键前缀**（不是我们的键，是 WMS 的）。
      *
      * 完整键 = 前缀 + [ScreenForm.storageKey] ⇒ `user_rotation_inner` / `user_rotation_outer`。
@@ -318,19 +515,42 @@ internal object PrefsBridge {
     /** 宿主 → App：标定结果 `"<token>|<step>|<status>"`（status ∈ ok/noface/badangle/starting/stopped） */
     val CALIB_RESULT = PREFIX + "bus_calib_result"
 
+
+
     /**
-     * 宿主 → App：**实时角度**（2026-10-01 新增）。
+     * 宿主 → App：**「多分屏已经到上限了」**，格式 `"<时刻ms>|<当前格数>|<上限>"`（A4，2026-10-05）。
      *
-     * 格式：`"<归一化角>|<原始roll>|<判定方向>|<系统方向>|<形态>|<时间戳ms>"`
-     * （角度为空串 = 当前没识别到人脸；时间戳 = 宿主的 `elapsedRealtime()`，
-     *  App 与宿主是同一条系统级时钟，可直接算"这个读数有多旧"）。
+     * ★★ 引擎写、界面读，而且**没有配对 token** —— 界面只按"值变了"判新旧
+     *   （旧的"折角校准结果"用的是严格配对，那个键已随校准下线）。
      *
-     * ⚠️ **刻意不走 [STATE] 那条总线**：总线是"变化才上报 + 2 秒节流"的慢变量通道，
-     *   而这里是 4Hz 的快变量。混进去会让整串状态每次都变，
-     *   等于把总线变成一条持续写入的日志（也会把「最近事件」冲掉）。
-     *   单开一个键，两边互不打扰。
+     * ⚠️ 为什么不让引擎自己震动 / 弹提示：本代码跑在 **SystemUI 进程**，
+     *   从那里触发震动在部分 ROM 上会被拦（缺 `VIBRATE` 权限的持有者身份），
+     *   而且"哪个 App 该收到反馈"这件事本身应当由界面决定。
+     *
+     * ⚠️ 引擎侧**只在真的到顶**时写一次（`dock 态` 与 `被拒` 都不写，见 `SplitTrigger.reportLimitHit`），
+     *   并且有 2 秒去重 ⇒ 界面侧**不需要**再做节流。
+     * ★ 上限值一并写回来（而不是让界面自己去读 `miui_multiple_split_resolved_max_stages`）：
+     *   那是**引擎实测过的**那个数（`resolveMaxStages` 的产物），界面侧不该自己算一遍 ——
+     *   两边算出的数不一致时，"到底几格是满"就成了第二个真值。
      */
-    val LIVE_ANGLE = PREFIX + "bus_live_angle"
+    val SPLIT_BUS_LIMIT = PREFIX + "bus_split_limit"
+
+    /**
+     * App 自己的键：**我已经给用户提示过哪一条「到上限」回报了**（A4，2026-10-05）。
+     *
+     * ★★ 为什么必须**落盘**、而不是放在界面内存里（`remember`）：
+     *   用户折手机的场景**必然不在本 App 界面上**（他在分屏的两个 App 里操作）——
+     *   引擎那一刻写的提示，界面**根本来不及看到**。
+     *   如果"看过没看过"只记在内存里，那个提示就永远丢了 —— 这正是第一版
+     *   「没弹出提示」的根因（`SplitScreenPage` 里那个 `remember` 版轮询）。
+     * ⇒ 落盘之后：用户**下次打开 App 就补上那条提示**。这是唯一能真正送达的语义。
+     *
+     * ⚠️ 它记的是**引擎那条记录的时间戳**（[SPLIT_BUS_LIMIT] 的第 1 段），不是本机时间 ——
+     *   两边时钟是同一个（同机），所以直接比大小即可。
+     * ★ 与 [SPLIT_BUS_LIMIT] 是**两个不同的东西**：那个是"引擎说了什么"（引擎写），
+     *   这个是"用户看过没有"（App 写）⇒ ⛔ 别合并，否则引擎重写会把自己的已读状态冲掉。
+     */
+    const val SPLIT_LIMIT_SEEN = "split_limit_seen"
 
     // ---------------------------------------------------------------- 读写
     //

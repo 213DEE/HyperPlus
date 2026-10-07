@@ -36,7 +36,6 @@
     <string name="lang_name_auto">Follow system</string>
 
     <string name="lang_page_title">Language</string>
-    <string name="lang_page_summary">Interface language</string>
     <string name="lang_page_desc">Choose the language used in this app.</string>
     <string name="lang_page_hint">Changing it takes effect immediately.</string>
 
@@ -58,15 +57,50 @@
     <string name="settings_channel_default">The rotation service hasn\'t read your settings yet.</string>
     <string name="settings_channel_fix">Until it\'s fixed nothing here works — in LSPosed, enable HyperPlus and tick “System UI” in its scope.</string>
     <string name="settings_section_monitor">Monitoring &amp; troubleshooting</string>
+    <string name="settings_perm_title">Permissions</string>
+    <string name="settings_perm_summary">Module · Root · Write system settings</string>
     <string name="settings_status_title">Current status</string>
     <string name="settings_status_summary">Runtime · Rotation control · Current orientation · Semi-auto button</string>
     <string name="settings_diag_title">Diagnostics</string>
-    <string name="settings_diag_summary">Trigger &amp; handoff · Detection metrics · Data log · Recent events</string>
+    <!-- ⚠️ 2026-10-06：本摘要**从四要素改成三要素** —— 「数据记录 · 最近事件」
+         已搬去三级页「运行记录」（诊断页现在只剩两段实时快照 ＋ 一行该入口）。
+         ⛔ 别按旧印象把它改回去。 -->
+    <string name="settings_diag_summary">Trigger &amp; handoff · Detection metrics · Run records</string>
+    <string name="settings_restart_section">Maintenance</string>
+    <string name="settings_restart_note">Restart the status bar and navigation bar. They come back on their own after a few seconds. Use this when a change does not take effect.</string>
+    <string name="settings_restart_btn">Restart System UI</string>
+    <string name="settings_restart_dlg_title">Restart System UI?</string>
+    <string name="settings_restart_dlg_msg">The status bar and navigation bar will disappear for a few seconds, then come back automatically.</string>
+    <string name="settings_restart_dlg_cancel">Cancel</string>
+    <string name="settings_restart_dlg_confirm">Restart</string>
+    <string name="settings_restart_no_root">Restart failed: no usable root on this device.</string>
     <string name="settings_section_app">App</string>
     <string name="settings_about_title">About</string>
     <string name="settings_about_summary">Version · Check for updates · How it runs · Disclaimer</string>
     <string name="settings_language_title">Language</string>
     <string name="settings_language_summary">Follow system · 简体中文 · 繁體中文 · English</string>
+
+    <!-- ================================================ 二级页：权限管理 -->
+    <string name="perm_title">Permissions</string>
+    <string name="perm_section_note">About this page</string>
+    <string name="perm_explain">All three below have to be in place before the features do anything. Tap any row marked Missing to go grant it.</string>
+    <string name="perm_section_items">Checks</string>
+    <string name="perm_lsposed_title">LSPosed module</string>
+    <string name="perm_lsposed_ok">Running</string>
+    <string name="perm_lsposed_missing">Not running — tap to open LSPosed, enable HyperPlus and tick “System UI”</string>
+    <string name="perm_root_title">Root</string>
+    <string name="perm_root_ok">Granted</string>
+    <string name="perm_root_denied">Not granted — tap to ask again</string>
+    <string name="perm_root_unavailable">This device has no root, so there is nothing to grant</string>
+    <string name="perm_probing">Checking…</string>
+    <string name="perm_write_title">Write system settings</string>
+    <string name="perm_write_ok">Built into System UI, nothing for you to do</string>
+    <string name="perm_write_missing">Unexpected: the service is running but can\'t get it — restart System UI and check again</string>
+    <string name="perm_write_unknown">Not read — the rotation service isn\'t running; fix the first check above</string>
+    <string name="perm_state_ok">OK</string>
+    <string name="perm_state_missing">Missing</string>
+    <string name="perm_state_unknown">Not read</string>
+    <string name="perm_recheck">Check again</string>
 
     <!-- ================================================ 二级页：关于 -->
     <string name="about_title">About</string>
@@ -82,17 +116,66 @@
     <string name="function_title">Features</string>
     <string name="function_section_rotation">Rotation</string>
     <string name="function_section_experimental">Experimental</string>
+    <!-- ⚠️ function_section_rotation / function_section_split 自 2026-10-04 起**不再被引用**：
+         用户点名把「旋转」「分屏」两个小标题合并成下面这一个（原话：「把主页的旋转、分屏
+         两个小标题，合并成"系统增强"小标题」）。保留键位只是让"合并"这一步可回退，
+         ⛔ 别据此以为页面上还有两个小标题。 -->
+    <string name="function_section_system">System enhancements</string>
     <string name="function_rotation_title">Rotation enhancements</string>
     <string name="function_rotation_summary">Inner screen: %1$s; the outer screen is handled by the system (Mode / Floating button / Orientation / App list)</string>    <string name="function_state_probing">Reading status…</string>
-    <string name="function_state_noservice">Can\'t reach the rotation service</string>
-    <string name="function_state_offline">Rotation service is offline</string>
+    <string name="function_state_noservice">Can\'t reach the enhancement service</string>
+    <string name="function_state_offline">Enhancement service is offline</string>
     <string name="function_state_running">Running</string>
-    <string name="function_state_probing_long">Reading rotation service status…</string>
+    <string name="function_state_probing_long">Reading enhancement service status…</string>
     <string name="function_no_report">No status report received yet. The most common cause is the module not being enabled in LSPosed (in that case settings are saved, but the screen won\'t rotate).</string>
     <string name="function_lost">Last response was %1$d seconds ago (over %2$d s counts as offline); it recovers automatically after System UI restarts — just wait a moment.</string>
     <string name="function_mode_system">Current mode is “Follow system”; this app won\'t interfere</string>
     <string name="function_not_active">Not active yet</string>
     <string name="function_await_first">Waiting for first detection — rotate your phone</string>
+    <!-- 运行状态（2026-10-04 晚）：主语是整个模块，报「启用了哪些增强」 -->
+    <!-- ⚠️ 一个都不启用时**不许给祈使句**（见 FunctionPage.enabledSummary 的注释：
+         分屏现在没有界面开关，让人去点不存在的东西是本页文案最忌讳的错误）。 -->
+    <string name="function_running_summary">Enabled: %1$s</string>
+    <string name="function_running_sep"> · </string>
+    <string name="function_running_none">All enhancements are currently off</string>
+    <!-- ================================================ Split screen (2026-10-04) -->
+    <!-- ⚠️ split_dir_left / split_dir_right mirror the user's own wording; keep them short -->
+    <string name="function_section_split">Split screen</string>
+    <string name="function_split_title">Split screen enhancements</string>
+    <string name="function_split_summary">Direction of the 2-app split: %1$s</string>
+    <string name="split_title">Split screen enhancements</string>
+    <string name="split_dir_section">Direction of the 2-app split</string>
+    <string name="split_dir_note">When a light fold adds another split pane, which side the current app stays on.</string>
+    <string name="split_dir_left">To the left</string>
+    <string name="split_dir_right">To the right</string>
+    <!-- ================================================ 到上限提示（2026-10-05，A4）
+         ⚠️ 措辞是**用户原话**：「分屏数量已达上限」⇒ 逐字照抄，⛔ 不许顺手"优化"。 -->
+    <string name="split_limit_toast">Split screen limit reached</string>
+    <!-- 2026-10-06：「角度校准」整体下线（用户原话「不给这么多自定义功能，越多越难做」）
+         ⇒ 它那 27 条文案一并删除。唯一**改名保留**的是原 `split_calib_btn_confirm`
+         —— 高温保护那张卡的「确认」按钮还在用它（同一个动作、同一个词）。 -->
+<string name="split_thermal_btn_confirm">Confirm</string>
+    <!-- ================================================ 高温保护（2026-10-05） -->
+    <!-- ⚠️ split_thermal_warn 的措辞是**用户原话**（「该操作存在风险，请谨慎修改」）
+         ⇒ 逐字照抄，⛔ 不许顺手"优化"。
+         ⚠️ split_thermal_off_dlg_msg 必须把**不可逆风险**写清楚 —— 这是用户在需求里
+            点名的唯一硬要求（原话：「弹窗里面写清楚关闭过热保护可能造成不可逆的风险」），
+            ⛔ 别为了"不那么吓人"把它删成一句"确定要关闭吗"。 -->
+    <string name="split_thermal_sec_title">Overheat protection</string>
+    <string name="split_thermal_limit_note">Above this temperature the system stops adding split panes. Default is 47\u00b0C, the factory setting.</string>
+    <string name="split_thermal_limit_label">Limit (\u00b0C)</string>
+    <string name="split_thermal_limit_invalid">Enter a whole number between %1$d and %2$d.</string>
+    <string name="split_thermal_limit_summary">Currently %1$d\u00b0C</string>
+    <string name="split_thermal_warn">This setting carries risk \u2014 change it with care.</string>
+    <string name="split_thermal_reset">Restore default</string>
+    <string name="split_thermal_guard_title">Turn off overheat protection</string>
+    <string name="split_thermal_guard_summary">Off means the temperature limit above no longer applies</string>
+    <string name="split_thermal_on_dlg_title">Turn off overheat protection?</string>
+    <string name="split_thermal_on_dlg_msg">With protection off, the system will no longer stop adding split panes when the device gets hot. Running hot for long periods can permanently damage the battery and other hardware, and that damage cannot be undone. Only turn this off if you understand and accept the risk.</string>
+    <string name="split_thermal_off_dlg_title">Turn overheat protection back on?</string>
+    <string name="split_thermal_off_dlg_msg">The system will stop adding split panes once the device gets hot again.</string>
+    <string name="split_thermal_dlg_confirm">Turn off</string>
+    <string name="split_thermal_dlg_cancel">Cancel</string>
 
     <!-- ================================================ 实验功能（2026-10-03） -->
     <!-- ⚠️ experimental_warning 是**用户给的原话**（中文那两套逐字照抄），别"优化"措辞 -->
@@ -100,8 +183,12 @@
     <string name="experimental_title">Experimental features</string>
     <string name="experimental_warning">The features below are still experimental and may be extremely unstable. Use them with caution.</string>
     <string name="experimental_adaptive_title">Adaptive rotation</string>
-    <string name="experimental_adaptive_summary">Once on, select it in Rotation enhancements, under Mode</string>
-    <string name="experimental_adaptive_note">Turning it off only hides the option from Mode; it won\'t change the mode you are currently using.</string>
+    <string name="experimental_adaptive_summary">Once on, Adaptive rotation appears under Mode. Battery saver first appears only after you switch to Adaptive rotation</string>
+    <string name="experimental_adaptive_note">Turning it off only hides those two options; it won\'t change the settings you are currently using. Whatever you are using right now stays visible.</string>
+    <string name="experimental_multisplit_title">Raise split limit</string>
+    <string name="experimental_multisplit_summary">Once on, up to 8 apps can be split at the same time while folded (the system default is 6)</string>
+    <string name="experimental_multisplit_note">More than the default 6 is outside what the system supports, so it may be unstable. Restarting the system UI is required for the switch to take effect (see Restart System UI on the Settings page).</string>
+    <string name="experimental_multisplit_need_root">Writing this switch requires root — grant root on the Permissions page.</string>
 
     <string name="open_settings_failed">Can\'t open system settings: %1$s</string>
 
@@ -128,6 +215,13 @@
     <string name="mode_short_system">Follow system</string>
     <string name="mode_short_adaptive">Face</string>
     <string name="mode_short_semi">Semi-auto</string>
+    <!-- ★ R2（2026-10-05）：应用名单里每一行「四选一」的档位名。
+         ⚠️ 刻意用**短名**：它们渲染在行的右侧（下拉的值文本，见 OverlaySpinnerPreference
+           的 showValue），超宽会被省略号截断。⛔ 别改成 mode_label_* 那种全名。 -->
+    <string name="app_mode_follow_global">Follow global</string>
+    <string name="app_mode_system">Follow system</string>
+    <string name="app_mode_adaptive">Face</string>
+    <string name="app_mode_semi">Semi-auto</string>
     <string name="mode_summary_system">No interference: fully follows the system\'s “Auto-rotate” setting</string>
     <string name="mode_summary_adaptive">Uses the front camera to read which way your face is, then rotates the screen</string>
     <string name="mode_summary_semi">A button pops up in the bottom-right when you turn the phone; tap it to rotate. No camera, lowest battery use</string>
@@ -177,7 +271,6 @@
     <string name="takeover_unknown">Not active yet (can\'t tell why right now; check the “Diagnostics” page for details)</string>
 
     <string name="stop_whitelist">is on your exempt list</string>
-    <string name="stop_uncontrollable">is measured to not rotate on this screen</string>
     <string name="stop_other">is outside this app\'s control</string>
 
     <!-- ================================================ 运行阶段 -->
@@ -216,7 +309,7 @@
 
     <!-- ================================================ Orientation (2026-10-04: default + calibration merged) -->
     <string name="direction_title">Orientation</string>
-    <string name="direction_default_desc">After unfolding, the inner screen keeps this orientation.</string>
+    <string name="direction_default_desc">Sets the inner screen orientation each time you unfold. It does not affect rotation afterwards.</string>
     <string name="direction_root_note">Needs root; the first tap will show a permission prompt.</string>
     <string name="direction_unsupported">This device\'s system doesn\'t support orientation settings.</string>
     <string name="direction_failed">Couldn\'t change it — make sure root access was granted.</string>
@@ -232,6 +325,11 @@
     <string name="rotation_gate_title">Don\'t interfere with apps on the list (no resource contention while gaming)</string>
     <string name="rotation_gate_on">Apps on the list get no rotate button and no orientation changes; games and long videos are on it by default — remove an app if it doesn\'t feel responsive</string>
     <string name="rotation_gate_off">Off: every app works normally (may use a bit more power while gaming)</string>
+    <!-- ★ R1（2026-10-05）：自适应读不到环境时降级半自动。
+         ⚠️ 文案只讲"会发生什么 / 我该怎么办"，⛔ 别写成"连续 N 轮判定"那种实现说明。 -->
+    <string name="rotation_fallback_title">When it\'s too dark or no face is visible, fall back to tap-to-rotate</string>
+    <string name="rotation_fallback_on">On: when your face can\'t be read, a button pops up in the bottom-right — tap it to rotate. It switches back on its own once there\'s enough light</string>
+    <string name="rotation_fallback_off">Off: nothing happens when your face can\'t be read</string>
     <string name="rotation_handoff_title">Restore system auto-rotate when handing off</string>
     <string name="rotation_handoff_on">Hand the orientation back to the system, so full-screen video and photos can still rotate</string>
     <string name="rotation_handoff_off">Keep the current orientation (auto-rotate stays off)</string>
@@ -241,6 +339,9 @@
     <string name="rotation_notice_title">Usage note</string>
     <string name="rotation_notice_body">“Attention detection / Smart scanning” holds the front camera, so the orientation occasionally lags — consider turning it off: Settings → Lock screen → Attention detection.\n\nYou don\'t need to keep this app open, and it needs no autostart or battery whitelist — swiping it away or clearing it from Recents changes nothing.</string>
     <string name="rotation_notice_button">Open system settings</string>
+    <!-- ⚠️ rotation_preview_* 三条自 2026-10-06 起**不再被引用**：用户点名去掉旋转增强页的
+         「预览旋转按钮」（保留键位只是让这一步可回退 —— `AppPrefs.requestHintTest()`
+         与引擎侧那条链仍然保留）⇒ ⛔ 别据此以为页面上还有这个按钮。 -->
     <string name="rotation_preview_title">Preview the rotate button</string>
     <string name="rotation_preview_body">The button only appears when the phone\'s orientation differs from the screen\'s. Tapping here makes it pop up once right away (same place as usual, bottom-right); if nothing happens, check the Diagnostics page.</string>
     <string name="rotation_preview_button">Show me the button once</string>
@@ -255,6 +356,7 @@
     <string name="diag_kv_write">Modify system settings permission</string>
     <string name="diag_granted">Granted</string>
     <string name="diag_missing">Missing</string>
+    <string name="diag_grant_unknown">Unknown (not present in this state report)</string>
     <string name="diag_kv_cfg">Settings sync</string>
     <string name="diag_cfg_not_ready_engine">Not ready · the rotation service can\'t read it (%1$s)</string>
     <string name="diag_cfg_unknown">Unknown (not present in this state report)</string>
@@ -302,29 +404,55 @@
     <string name="diag_section_events">Recent events</string>
     <string name="diag_events_none">None</string>
 
+    <!-- 2026-10-06 新增（三级页改造） -->
+    <string name="diag_records_title">Run records</string>
+    <string name="diag_records_section">History</string>
+    <string name="diag_records_summary">Where logs live, and what happened recently</string>
+    <string name="diag_export_section">Troubleshooting</string>
+    <string name="diag_export_note">If something doesn\'t work, export a diagnostic log and send it to us — it bundles your device info, the module state and the runtime logs. Root is not required, but the module\'s own logs are only included when root is granted.</string>
+    <string name="diag_export_title">Export diagnostic log</string>
+    <string name="diag_export_busy">Collecting…</string>
+    <string name="diag_export_picker">Send log to</string>
+    <string name="diag_export_failed">Export failed — open the Permissions page to confirm the module is running, then try again.</string>
+
     <!-- ================================================ 应用名单 -->
-    <string name="wl_section_note">About the list</string>
-    <string name="wl_gate_off">⚠️ The switch above is off — this list has no effect right now, so changes won\'t do anything.</string>
-    <string name="wl_explain">Once enabled, that app\'s orientation is handed to the system and this app stops interfering.</string>
-    <string name="wl_on_title">Enabled (%1$d)</string>
-    <string name="wl_empty">The list is empty — this app manages every app; to let one through, turn it on in the list below.</string>
-    <string name="wl_tag_legend">“Default list” = shipped with the app; “Manually added” = turned on by you.</string>
+    <string name="wl_section_note">Per-app settings</string>
+    <string name="wl_gate_off">⚠️ The switch above is off — apps set to “%1$s” are still managed by this app for now. Other modes are unaffected.</string>
+    <string name="wl_explain">Each app can pick its own rotation mode; apps you leave unset follow the global mode.</string>
+    <string name="wl_on_title">Customized (%1$d)</string>
+    <string name="wl_empty">Nothing set yet — every app follows the global mode. To set one, pick a mode in the list below.</string>
+    <string name="wl_tag_legend">“Default list” = shipped with the app; “Manually added” = set by you.</string>
     <string name="wl_section_search">Search</string>
     <string name="wl_search_label">App name or package</string>
-    <string name="wl_count">%1$d apps installed · %2$d on the list</string>
-    <string name="wl_count_uc"> · %1$d won\'t rotate (measured)</string>
+    <string name="wl_count">%1$d apps installed · %2$d customized</string>
     <string name="wl_count_match"> · %1$d matching</string>
-    <string name="wl_reset">Reset to default (re-enable removed defaults)</string>
-    <string name="wl_clear">Clear measured records (%1$d)</string>
-    <string name="wl_clear_note">Detection restarts after clearing; it takes a second or two.</string>
+    <string name="wl_reset">Reset to default (clear all per-app settings)</string>
     <string name="wl_section_installed">Installed apps (A-Z)</string>
+    <string name="wl_show_all">Show all apps (%1$d)</string>
+    <string name="wl_hide_all">Hide the list</string>
     <string name="wl_loading">Reading the app list…</string>
     <string name="wl_no_match">No app matches “%1$s”.</string>
     <string name="wl_tag_default"> · Default list</string>
     <string name="wl_tag_manual"> · Manually added</string>
-    <string name="wl_tag_uc"> · Won\'t rotate (measured)</string>
     <string name="wl_own_note">This app isn\'t on the list by default, so its own settings page is managed too (you\'ll see the rotate button). Turn this on to let the settings page follow the system.</string>
-    <string name="uc_note">Measured as unrotatable: this app tried to rotate on the %1$s but the screen didn\'t change, so it no longer controls it.</string>
+
+    <!-- 2026-10-06 新增（三级页改造） -->
+    <string name="wl_page_title">App list</string>
+    <string name="wl_entry_section">Per-app settings</string>
+    <string name="wl_entry_summary">Pick a rotation mode for each app</string>
+
+    <!-- ================================================ 分屏名单 -->
+    <string name="swl_section_note">About the list</string>
+    <string name="swl_explain">Apps on this list won\'t be split when you fold the screen — games are on it by default.</string>
+    <string name="swl_on_title">Enabled (%1$d)</string>
+    <string name="swl_empty">Nothing is on the list — every app gets split when you fold. To exempt one, turn it on in the list below.</string>
+    <string name="swl_count">%1$d apps installed · %2$d on the list</string>
+    <string name="swl_reset">Reset to default (re-enable removed defaults)</string>
+
+    <!-- 2026-10-06 新增（三级页改造） -->
+    <string name="swl_page_title">App list</string>
+    <string name="swl_entry_section">About the list</string>
+    <string name="swl_entry_summary">Apps that won’t be split when you fold the screen</string>
 
     <!-- ================================================ 捐赠卡 -->
     <string name="donate_title">Support HyperPlus</string>
@@ -336,8 +464,7 @@
     <string name="donate_save_button">Save QR code to gallery</string>
     <string name="donate_terms">On pricing: it will stay free throughout the Alpha stage; charging for some features after a Beta or stable release isn\'t ruled out.</string>
 
-    <!-- ================================================ 更新弹窗 -->
-    <string name="update_title">New version available</string>
+    <!-- ================================================ 更新弹窗 -->    <string name="update_title">New version available</string>
     <string name="update_subtitle">%1$s\u3000(current %2$s)</string>
     <string name="update_no_notes">The author didn\'t write release notes — tap “Download” for details.</string>
     <string name="update_later">Later</string>

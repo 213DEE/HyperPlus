@@ -135,6 +135,123 @@ enum class RotateMode {
 }
 
 /**
+ * ★★★ **「每个应用单独适配」的旋转方式**（2026-10-05 新增）—— 应用列表里一行一个。
+ *
+ * 用户原话（2026-10-05）：「应用列表「**每个应用单独适配**」（跟随全局 / 跟随系统 /
+ * 自适应 / 半自动）」，并拍板「**不在名单的应用视为跟随全局**」。
+ *
+ * ============================ 四个档位各自是什么意思 ============================
+ *
+ * | 档 | 该应用前台时用的档 | 落盘在哪 |
+ * |---|---|---|
+ * | [FOLLOW_GLOBAL] | **当前生效的全局档**（[AppPrefs.modeInner]） | 不落盘（= 没被指名） |
+ * | [SYSTEM] | [RotateMode.SYSTEM]（本应用不干预它） | **名单的 add/remove 两份集合** |
+ * | [ADAPTIVE] | [RotateMode.ADAPTIVE] | [PrefsBridge.APP_ROTATE_MODES] |
+ * | [SEMI] | [RotateMode.SEMI] | [PrefsBridge.APP_ROTATE_MODES] |
+ *
+ * ★★ **为什么后两档的"跟随系统 / 跟随全局"不落本键** —— 这是本节最要紧的一处取舍：
+ *   改造前那个布尔开关就是这两档（开 = 跟随系统 = 进名单、关 = 跟随全局 = 出名单）
+ *   ⇒ 借道既有名单之后，**老用户勾过的每一格语义不变、零迁移**，
+ *     而且"谁不受本应用控制"仍然只有一个真值来源（[AppWhitelist.resolve]）。
+ *   ⛔ 别为了"四个档整齐"把这两档也写进 [PrefsBridge.APP_ROTATE_MODES]：
+ *     那会立刻造出两份互相打架的名单，且"到底听谁的"变成第二个真值。
+ *
+ * ⚠️ 顺序 = 界面上下拉里的顺序（**逐字照用户给的次序**，见 [PICKER]）——
+ *   多语言纪律：中文原字面量逐字搬，⛔ 别顺手"优化"成「默认 / 系统 / 人脸 / 点击」之类。
+ */
+enum class AppRotateMode(
+    /**
+     * 解析后的旋转档。
+     * `null` = **[FOLLOW_GLOBAL]**（跟随全局）—— 它不是一个具体的档，而是"不指名"。
+     */
+    val mode: RotateMode?,
+) {
+    /** 跟随全局：用「旋转增强」里那一档（出厂默认） */
+    FOLLOW_GLOBAL(null),
+
+    /** 跟随系统：本应用交给系统，本应用不干预（= 旧开关"打开"） */
+    SYSTEM(RotateMode.SYSTEM),
+
+    /** 自适应：这个人脸转 */
+    ADAPTIVE(RotateMode.ADAPTIVE),
+
+    /** 半自动：这个弹按钮让用户确认 */
+    SEMI(RotateMode.SEMI);
+
+    /**
+     * 是否**需要写进** [PrefsBridge.APP_ROTATE_MODES]。
+     *
+     * ★ 判据 = "它是不是一个**具体的、要干预**的档"（[RotateMode.engages]）——
+     *   由 [mode] 派生，⛔ 没有第二份名单。见类注释那条取舍。
+     */
+    val stored: Boolean get() = mode?.engages == true
+
+    /**
+     * **界面口径**的名字（多语言）。
+     *
+     * ⚠️ 这里**刻意只有一份**（没有 [RotateMode] 那种 `label` 日志口径）：它与
+     *   `SplitUnfoldDirection.labelRes` 同源 —— **只有界面一处用途**（引擎取档用的是
+     *   [mode]，日志打的是那个枚举自己的名字）。将来引擎真要拿它打日志，再加一份不迟。
+     */
+    @get:StringRes
+    val labelRes: Int
+        get() = when (this) {
+            FOLLOW_GLOBAL -> R.string.app_mode_follow_global
+            SYSTEM -> R.string.app_mode_system
+            ADAPTIVE -> R.string.app_mode_adaptive
+            SEMI -> R.string.app_mode_semi
+        }
+
+    companion object {
+
+        /**
+         * 界面上"四选一"的**顺序**。
+         *
+         * ★ 逐字取用户给的次序（跟随全局 / 跟随系统 / 自适应 / 半自动）——
+         *   它同时是"从最不干预到最干预"的方向，读起来也是顺的。
+         */
+        val PICKER: List<AppRotateMode> = listOf(FOLLOW_GLOBAL, SYSTEM, ADAPTIVE, SEMI)
+
+        /**
+         * 读盘：`"<包名>=<枚举名>\n…"` → map。
+         *
+         * ★ **防御式解析**（与 [AppWhitelist.decode] 同一条纪律）：文件可能被手改过、
+         *   也可能是更老的版本留下的，任何一行解析不出来都**只跳过那一行**，
+         *   ⛔ 不抛异常 —— 这条路径跑在**界面冷启动**上，抛一次就是整个界面起不来。
+         */
+        fun decode(raw: String?): Map<String, AppRotateMode> {
+            if (raw.isNullOrBlank()) return emptyMap()
+            val out = LinkedHashMap<String, AppRotateMode>()
+            raw.split('\n').forEach { line ->
+                val s = line.trim()
+                if (s.isEmpty()) return@forEach
+                val i = s.indexOf('=')
+                if (i <= 0) return@forEach
+                val pkg = s.substring(0, i).trim()
+                if (pkg.isEmpty()) return@forEach
+                val v = runCatching { valueOf(s.substring(i + 1).trim()) }.getOrNull()
+                    ?: return@forEach
+                out[pkg] = v
+            }
+            return out
+        }
+
+        /**
+         * 落盘：map → `"<包名>=<枚举名>\n…"`（排序后，只写 [stored] 的那些）。
+         *
+         * ★ 排序 + 单键字符串：与 [AppWhitelist.encode] 同源的两个理由 ——
+         *   ① 穿过广播快照的长度前缀格式时它天然是一个可打印的差异；
+         *   ② 引擎侧"内容变没变"的判据是**整快照比对**（见 `ModulePrefs.advanceBaseline`），
+         *      稳定的顺序能让"改了一个包"在诊断日志里一眼可见。
+         */
+        fun encode(m: Map<String, AppRotateMode>): String =
+            m.filterValues { it.stored }
+                .toSortedMap()
+                .entries.joinToString("\n") { "${it.key}=${it.value.name}" }
+    }
+}
+
+/**
  * 采集策略 —— 用户要求做成可选开关的那一项。
  *
  * 两者的本质差别是「相机什么时候 open」：
@@ -179,6 +296,95 @@ enum class CaptureStrategy {
             POWER_SAVING -> R.string.strategy_summary_power
             RESPONSIVE -> R.string.strategy_summary_responsive
         }
+}
+
+/**
+ * 「**2 分屏展开方向**」—— 轻折一下追加一格分屏时，**当前应用留在哪一侧**。
+ *
+ * ★ 用户 2026-10-04 点名的选项（原话：「直接在 app 里面给选项「2 分屏展开方向：朝左 / 朝右」」）。
+ *   两个档位就是用户给的那两个词，**逐字照搬** —— ⛔ 别顺手"优化"成「左侧 / 右侧」「左 / 右」
+ *   之类的说法（多语言那一节的纪律：中文原字面量逐字搬）。
+ *
+ * ★ 为什么说的是"当前应用留哪侧"、而不是"新格开哪侧"：这是同一件事的两面
+ *   （两块屏，一个留、一个进），而"当前应用"是用户**看得见、能当场验证**的那个对象 ——
+ *   折一下看它跳到哪边，比数"新格排在左边还是右边"直观得多。
+ *
+ * ⚠️ **物理落点还没钉死**：证据目前只到「两条手势分支往里送的常量不同」
+ *   （✅ 反汇编实测，`docs/分屏增强_实现方案_2026-10-04.md` §1.10.6），
+ *   而「哪个常量 = 左边」**证不出来** ⇒ 观察钩子（§6 第 2 步）正是为了钉这一件事。
+ *   ⛔ 在钩子给出现场证据之前，别在任何实现里写死"LEFT 对应系统的几"。
+ */
+enum class SplitUnfoldDirection {
+    /** 朝左：轻折新增一格时，当前应用留在左边 */
+    LEFT,
+
+    /** 朝右：轻折新增一格时，当前应用留在右边 */
+    RIGHT;
+
+    /**
+     * **界面口径**的名字（多语言）。
+     *
+     * ⚠️ 这里**刻意只有一份**（没有 [RotateMode] 那种 `label` 日志口径）：判据与
+     *   `CaptureStrategy.summaryRes` 相同 —— **只有界面一处用途**。将来引擎真要拿它打日志，
+     *   再加一份不迟，那时两处要一起改。
+     */
+    @get:StringRes
+    val labelRes: Int
+        get() = when (this) {
+            LEFT -> R.string.split_dir_left
+            RIGHT -> R.string.split_dir_right
+        }
+}
+
+/**
+ * ★★★ 「轻折一下」的**四个触发阈值** —— **编译期常量**（2026-10-06 起）。
+ *
+ * 它们就是 `SplitTrigger` 判定状态机的全部输入量（代号沿用方案文档 §3）：
+ *
+ * | 字段 | 含义 | 判据 |
+ * |---|---|---|
+ * | [d1] | **进入**：比展开基线低这么多度 ⇒ 认为"用户开始折了" | `A0 - angle > D1` |
+ * | [d2] | **回弹**：回到基线 -D2 以内 ⇒ 认为"折完松手了" | `angle ≥ A0 - D2` |
+ * | [d3] | **合上保护**：比基线低这么多度 ⇒ 认为"这是要合上手机"，不触发 | `A0 - angle ≥ D3` |
+ * | [winMs] | **判定时限**：从进入开始算，超时就不触发 | `now - 进入 > win` |
+ *
+ * ============================ 🔴 它曾经是用户配置（2026-10-04 ~ 10-06） ============================
+ * 那时由「角度校准」页测出来、用户按「确认」生效，住 `AppPrefs.splitCalib`
+ * （键 `split_calib`）。用户 **2026-10-06** 原话：
+ * 「**把角度校准功能删掉，不给这么多自定义功能，越多越难做**」
+ * ⇒ 整条校准链下线，本类**退回只读常量**：[DEFAULT] 是**唯一真身**，没有第二条路径能改它。
+ * ⛔ **别把校准加回来**（已否一次）。要调阈值 = 改 [DEFAULT] 重新编译。
+ * ⚠️ 随校准一起删掉的还有 `fromDemo` / `decode` / `summary` / `trim` 四个方法 ——
+ *   它们全部只服务"校准页 + 落盘"。只留 [encode]，因为引擎启动日志要打这一行。
+ *
+ * ============================ 为什么这几个数能拿来用 ============================
+ * 它们不是拍的，是 2026-10-04 上午拿 `SplitTrigger` 的**原始折角轨迹日志**
+ * 在本机定标出来的（全展 179° / 半开 89~92° / 合上 2~3° / 真·轻折落差 24~52°、
+ * 完整来回 1122ms）—— 见 `docs/分屏增强_实现方案_2026-10-04.md` §3.1。
+ *
+ * 🔴 **2026-10-06 用户口径定死两处**（原话：「轻折一下、**在 1 秒内**展开才触发，
+ *   轻折一下、但是**超过 1 秒**；或者**折角超过 90 度**都不触发」）：
+ * - 窗口 `winMs` 由 1500 收到 **1000**（"1 秒内"）—— 它是从【进入】那一刻开始算的**绝对期限**。
+ * - 合上保护 `d3 = 90`（"折角超过 90 度不触发"）—— 它本来就是 90，本轮只是把它**冻结**。
+ *   ⚠️ `d3` 是**相对量**："比展开基线低了 90°"。本机全展 ≈179° ⇒ 等价于"铰链角掉到 89°
+ *     以下"，与用户说的"折角超过 90 度"是同一件事（90° 恰好是本机的半开位）。
+ */
+data class SplitThresholds(
+    val d1: Float,
+    val d2: Float,
+    val d3: Float,
+    val winMs: Long,
+) {
+    /** 日志格式 `"<D1>|<D2>|<D3>|<winMs>"`（只被 `SplitTrigger` 的启动日志用） */
+    fun encode(): String = "$d1|$d2|$d3|$winMs"
+
+    companion object {
+        /**
+         * ★★★ **唯一真身** —— 引擎（`SplitTrigger`）与界面都读这一份。
+         * ⛔ 别在别处再写一份字面量：两个真身的后果是"日志说 A、实际按 B 判"。
+         */
+        val DEFAULT = SplitThresholds(d1 = 20f, d2 = 6f, d3 = 90f, winMs = 1_000L)
+    }
 }
 
 /**
@@ -268,6 +474,7 @@ object AppPrefs {
      */
     private const val K_CALIB_STEP1 = "calib_step1_done"
     private const val K_CALIB_STEP2 = "calib_step2_done"
+
 
     /**
      * 交还目标值的哨兵：**我们没有改过** `accelerometer_rotation`，交还时**一个字节都不许碰**。
@@ -367,6 +574,15 @@ object AppPrefs {
     private val _gateEnabled = MutableStateFlow(true)
 
     /**
+     * ★★★ **自适应「读不到环境」时临时降级半自动**（2026-10-05 新增，R1）—— 用户配置。
+     *
+     * ★ 默认 `true`（理由见 [PrefsBridge.ADAPTIVE_FALLBACK]：暗光下自适应的表现是
+     *   "转手机完全没反应"，用户分不清"坏了"和"环境不允许"）。
+     * ★ **引擎要读它** ⇒ 两条读盘路径成对灌，见 [reloadFromPrefs] 与 [applyFromModulePrefs]。
+     */
+    private val _r1Fallback = MutableStateFlow(true)
+
+    /**
      * ★ 「实验功能 → 自适应旋转」总闸（界面**可见性**开关，2026-10-03）。
      *
      * 默认 **false**（关）：自适应旋转仍处于实验阶段（效果不稳定），
@@ -376,6 +592,89 @@ object AppPrefs {
      *   的注释。换句话说：关掉它不会把正在用自适应的用户踢出去。
      */
     private val _experimentalAdaptive = MutableStateFlow(false)
+    /**
+     * ★ 「实验功能 → 提高分屏上限」总闸（2026-10-06）。
+     *
+     * 默认 **false**。打开 ⇒ `SplitStageLimit` 把多分屏上限抬到 8（**要重启系统界面**）；
+     * 关着 ⇒ 那边**什么都不做**，系统默认（本机 6）原样保留。
+     *
+     * ⚠️ 它**必须能被模块侧读到**（这一点与 [experimentalAdaptive] 不同）：那个只管界面
+     *   可见性；这一个要经「App prefs → 全量快照 → Settings 镜像 → 模块」那条链走一趟。
+     *   ★ 链路**零新增** —— 快照本来就是 `prefs.all` 全量抽。
+     */
+    private val _experimentalMultiSplit = MutableStateFlow(false)
+
+    /**
+     * ★★ 「**2 分屏展开方向**」—— 用户 2026-10-04 点名要的选项。
+     *
+     * 含义与值的判据见 [SplitUnfoldDirection]；键名与落盘约定见 [PrefsBridge.SPLIT_UNFOLD_DIR]。
+     *
+     * ⚠️ 默认值**暂定 [SplitUnfoldDirection.LEFT]**：它现在还没有现场证据支撑
+     *   （"哪一侧对应系统的哪个值"要等观察钩子，见 [SplitUnfoldDirection] 的注释）。
+     *   选 LEFT 只是因为用户给的文案里"朝左"写在前面 —— ⛔ 别把它当成已定的事实，
+     *   钩子给出结论之后，若与原生手感不一致，这里要跟着改。
+     *
+     * ⚠️ 它是**引擎要读的配置**（分屏触发要用）⇒ 两条读盘路径都要灌，见
+     *   [reloadFromPrefs] 与 [applyFromModulePrefs]，⛔ 别只加一处。
+     */
+    private val _splitUnfoldDir = MutableStateFlow(SplitUnfoldDirection.LEFT)
+
+    // ------------------------------------------------ 高温保护（2026-10-05 用户点名）
+
+    /**
+     * ★★ 多分屏的**高温保护阈值**（摄氏度，整数）—— 用户配置。
+     *
+     * 语义与取值范围见 [PrefsBridge.SPLIT_THERMAL_LIMIT_C]（那里写清了它到底改的是什么、
+     * 为什么上限是 60）。
+     * ⚠️ 默认值恒等于系统的出厂值 [THERMAL_LIMIT_C_DEFAULT] —— 界面上的「恢复默认」
+     *   按钮写的就是它，⛔ 别在界面里另写一个字面量。
+     */
+    private val _splitThermalLimitC = MutableStateFlow(THERMAL_LIMIT_C_DEFAULT)
+
+    /**
+     * ★★ **是否关掉多分屏的高温保护**（默认 false）。
+     *
+     * 语义与风险见 [PrefsBridge.SPLIT_THERMAL_GUARD_OFF]。
+     * ⚠️ 它与 [_splitThermalLimitC] 是**两个独立手段**，⛔ 别合并语义。
+     */
+    private val _splitThermalGuardOff = MutableStateFlow(false)
+
+    /**
+     * 温度上限的**取值边界与默认值** —— ⛔ 三处算术都以这里为唯一真值。
+     *
+     * ★ [THERMAL_LIMIT_C_DEFAULT] = **47**：不是我们拍的，是**照抄系统的出厂值**
+     *   （`MultiTaskingTemperatureObserver.HIGH_TEMPERATURE = 47`，实测记录见
+     *   `docs/分屏增强_实现方案_2026-10-04.md` §14.2）⇒ 「恢复默认」＝"回到厂商设定"。
+     * ★ [THERMAL_LIMIT_C_MAX] = **60** 是**用户点名的硬顶**（原话「禁止超过60度」）——
+     *   它是"输入框接受的最大值"，也是 [setSplitThermalLimitC] 的夹取上界。
+     *
+     * ★★ [THERMAL_LIMIT_C_MIN] = **40** —— **2026-10-05 由单测纠正过一次**（原为 30）。
+     *
+     *   原本按"低于某个值就等于关掉保护"这个直觉取了 30。但本机日常板温实测是
+     *   **35.969°C**（见 `docs/分屏增强_实现方案_2026-10-04.md` §14.2.1）
+     *   ⇒ 下限 30 **低于日常温度**，用户把输入框拉到最小，阈值就落到常温之下
+     *   ⇒ 高温判定**永远不会触发** ⇒ 那是一条**不经过二次确认弹窗**的关保护路径，
+     *   正好绕开我们特意加的那道闸（[PrefsBridge.SPLIT_THERMAL_GUARD_OFF]）。
+     *
+     *   ⚠️ 这个错是 `ThermalLimitTest.minIsAboveIdleBoardTemperature` **抓出来的**
+     *   （它当时真的红了）—— 那条测试的存在理由就是钉死"下限必须高于日常板温"。
+     *
+     *   取值理由：40 明显高于日常 36（留 4°C 余量，覆盖"轻微发热但远没到关机"的常态），
+     *   又明显低于出厂 47 —— 用户往低调时仍有一段**真实有效**的区间（40~46）。
+     *   ⛔ 别再往下调：每降 1°C 就多一分"这个输入框其实是隐形开关"的风险。
+     */
+    const val THERMAL_LIMIT_C_MIN = 40
+    const val THERMAL_LIMIT_C_MAX = 60
+    const val THERMAL_LIMIT_C_DEFAULT = 47
+
+    /**
+     * 把任意温度值归一成**合法的摄氏度整数**（夹在 [[THERMAL_LIMIT_C_MIN], [THERMAL_LIMIT_C_MAX]]）。
+     *
+     * ★ 与 [snapHintMs] 同型：归一放在**唯一入口**（[setSplitThermalLimitC] 与两条读盘路径），
+     *   而不是只靠界面输入框的过滤器 —— 配置将来可能从别处写（迁移 / 文件被手改），
+     *   把边界收在入口上，引擎读到的就恒是合法值。
+     */
+    fun clampThermalLimitC(v: Int): Int = v.coerceIn(THERMAL_LIMIT_C_MIN, THERMAL_LIMIT_C_MAX)
 
     /** 按钮等待时长的取值边界与默认值（用户 2026-09-28 点名：最少 1s、最多 60s） */
     const val HINT_MS_MIN = 1_000
@@ -413,20 +712,6 @@ object AppPrefs {
     private val _hintMs = MutableStateFlow(HINT_MS_DEFAULT)
 
     /**
-     * ★ **清除「实测不可控」名单**的请求值（App 写、引擎读）。
-     *
-     * 每次点"清除"都写一个**新的 wall-clock 时间戳** —— 引擎靠"值变了"驱动，
-     * 不比较大小也不复位（复位做不到：引擎写不了 App 的私有文件）。
-     * 完整理由见 [PrefsBridge.UNCONTROLLABLE_CLEAR]。
-     *
-     * ⚠️ 它是**请求**不是状态：引擎处理完**不会**改它，所以它长期停在最后一个时间戳上。
-     *   引擎侧据此必须做"首次只记账、不当动作"的处理（见
-     *   `AdaptiveEngine.handleUncontrollableClearRequest`）—— 否则引擎每次重启
-     *   都会把用户好不容易攒下的实测记录清掉一次。
-     */
-    private val _uncontrollableClearReq = MutableStateFlow("")
-
-    /**
      * 「弹一次按钮给我看看」的请求（值 = `<时间戳>|<目标方向>`）。
      *
      * ★ 为什么需要：半自动按钮只在传感器判定"设备姿态 ≠ 屏幕方向"时出现，而传感器
@@ -436,24 +721,6 @@ object AppPrefs {
      *   所以这不是"绕过传感器的入口"，只是让人能看见按钮。
      */
     private val _hintTestReq = MutableStateFlow("")
-
-    /**
-     * ★★ **实时角度预览**开关（2026-10-01 新增；App 写、引擎读）。
-     *
-     * 用户原话：「在方向校准里面加一个实时的角度显示，我告诉你正确方向」。
-     *
-     * ★ 它是**状态**，不是请求：界面进「方向校准」时置 true、离开时置 false，
-     *   引擎直接跟着这个值开/停前摄。（与其他三个请求键的"值变了"驱动不同，
-     *   这里不比较新旧值 —— 状态本来就该是可以反复重放的。）
-     *
-     * ⚠️ **不跨进程启动存活**：预览只在"用户正盯着那一页"时才有意义。
-     *   App 崩溃 / 被杀会留下一个 `true`，下一次冷启动若照它开相机就是白耗电
-     *   ⇒ [init] 读盘时**强制复位**（见那边的注释）；引擎侧也另有一道"首次只记账"的闸。
-     */
-    private val _anglePreview = MutableStateFlow(false)
-
-    /** 实时角度预览开关（界面读它显示"正在读数"；引擎 `collect` 它启停采样） */
-    val anglePreview: StateFlow<Boolean> = _anglePreview.asStateFlow()
 
     // --------------------------------------- 应用白名单（2026-09-28 建立 / 09-29 内外屏解耦）
 
@@ -467,6 +734,46 @@ object AppPrefs {
 
     /** 用户**手动关闭**的包。为什么必须是独立一份减集：见 [PrefsBridge.WHITELIST_REMOVE] */
     private val _wlDel = MutableStateFlow<Set<String>>(emptySet())
+
+    /**
+     * ★★★ **每个应用单独指定的旋转方式**（2026-10-05 新增，R2）—— 键名与编码见
+     * [AppPrefs.AppRotateMode] 与 [PrefsBridge.APP_ROTATE_MODES]。
+     *
+     * ⚠️ **它只装 [AppRotateMode.ADAPTIVE] / [AppRotateMode.SEMI]**
+     *   —— 另外两档由名单那两份集合表达（取舍见 [AppRotateMode] 类注释）。
+     *   ⇒ 引擎侧**不能**只读它来回答"这个应用该用哪一档"，必须走 [modeFor]。
+     *
+     * ★ 为什么它是个 `StateFlow` 且引擎会 `collect`：用户改一个应用的方式 ⇒
+     *   引擎要在 2 秒内（下一次前台巡检）按新档干活，不需要重启任何东西。
+     *   与 [_whitelist] 同一条纪律。
+     */
+    private val _appModes = MutableStateFlow<Map<String, AppRotateMode>>(emptyMap())
+
+    // ---------------------------------------- 分屏名单（2026-10-05 新增，**与上面那份独立**）
+
+    /**
+     * 分屏名单：用户**手动加进来**的包。
+     *
+     * ★★ 与 [_wlAdd] **刻意是两份东西**（用户 2026-10-05 拍板「各自独立一份」）——
+     *   命中语义不同（"不干涉转屏" vs "折一下也不分屏"），混一份会让改一边、另一边莫名变化。
+     *   键名与落盘约定见 [PrefsBridge.SPLIT_WHITELIST_ADD]。
+     */
+    private val _swlAdd = MutableStateFlow<Set<String>>(emptySet())
+
+    /** 分屏名单：用户**手动移出**的包（独立减集，理由同 [_wlDel]） */
+    private val _swlDel = MutableStateFlow<Set<String>>(emptySet())
+
+    /**
+     * **生效**分屏名单（派生值 = [SplitWhitelist.resolve] 的结果）。
+     *
+     * ★ 为什么存派生态而不是每次现算：引擎侧要在**每次折叠判定成立时**做一次集合查找
+     *   （见 `SplitTrigger.onTrigger` 的前置闸），现算就得每次拼一遍默认清单的 30 多个包名。
+     *   派生值只在输入变化时重算，见 [refreshSplitWhitelist]。
+     *
+     * ⚠️ 它是 StateFlow 且引擎会读它 —— 与 [_whitelist] 同一条纪律：
+     *   用户改一个开关 ⇒ 引擎下一次折叠就用新集合（不需要重启任何东西）。
+     */
+    private val _splitWhitelist = MutableStateFlow<Set<String>>(emptySet())
 
     /**
      * **生效**白名单（派生值 = [AppWhitelist.resolve] 的结果）。
@@ -574,22 +881,42 @@ object AppPrefs {
     val gateEnabled: StateFlow<Boolean> = _gateEnabled.asStateFlow()
 
     /**
+     * R1（2026-10-05）：自适应读不到环境时，是否临时降级成半自动。
+     *
+     * ★ 界面**只读**它画那个开关；真正的判定在引擎侧
+     *   （`AdaptiveEngine.noteAdaptiveEnv` 累积、`mode()` 消费）。
+     *   ⛔ 别在界面里复现"几轮才算降级"那套判据 —— 那是引擎的账。
+     */
+    val r1Fallback: StateFlow<Boolean> = _r1Fallback.asStateFlow()
+
+    /**
      * 「实验功能 → 自适应旋转」是否已启用（默认 false）。
      *
      * ★ 只被**界面**读：`false` 时「旋转增强 → 模式」不列出 `ADAPTIVE` 那一档。
      * ⚠️ 引擎不读它，也不该读 —— 见 [PrefsBridge.EXPERIMENTAL_ADAPTIVE]。
      */
     val experimentalAdaptive: StateFlow<Boolean> = _experimentalAdaptive.asStateFlow()
+    /** 见 [_experimentalMultiSplit] */
+    val experimentalMultiSplit: StateFlow<Boolean> = _experimentalMultiSplit.asStateFlow()
+
+    /** 「2 分屏展开方向」（界面显示 / 修改；引擎侧从镜像读同一份真值，见 [SplitUnfoldDirection]） */
+    val splitUnfoldDir: StateFlow<SplitUnfoldDirection> = _splitUnfoldDir.asStateFlow()
+
+
+    /**
+     * 多分屏的**高温保护阈值**（摄氏度；30~60，默认 [THERMAL_LIMIT_C_DEFAULT]）。
+     * ★ 界面输入框读它；引擎侧从镜像读同一份真值（见 [PrefsBridge.SPLIT_THERMAL_LIMIT_C]）。
+     */
+    val splitThermalLimitC: StateFlow<Int> = _splitThermalLimitC.asStateFlow()
+
+    /**
+     * 是否**关掉**多分屏的高温保护（默认 false ⇒ 保护是开的）。
+     * ★ 界面开关读它；引擎侧从镜像读同一份真值（见 [PrefsBridge.SPLIT_THERMAL_GUARD_OFF]）。
+     */
+    val splitThermalGuardOff: StateFlow<Boolean> = _splitThermalGuardOff.asStateFlow()
 
     /** 半自动按钮等待时长（毫秒，1000~60000）。界面滑条读它，引擎侧由配置通道灌入 */
     val hintMs: StateFlow<Int> = _hintMs.asStateFlow()
-
-    /**
-     * 清除「实测不可控」名单的请求（值 = App 每次点"清除"时写的时间戳）。
-     *
-     * ★ 引擎 `collect` 它 ⇒ 用户点一下，毫秒级就代为删掉 `Settings.System` 里那张名单。
-     */
-    val uncontrollableClearReq: StateFlow<String> = _uncontrollableClearReq.asStateFlow()
 
     /** 「预览旋转按钮」的请求（值 = `<时间戳>|<目标方向>`）。引擎 `collect` 它并弹一次按钮 */
     val hintTestReq: StateFlow<String> = _hintTestReq.asStateFlow()
@@ -598,6 +925,24 @@ object AppPrefs {
      * 生效的应用白名单（默认清单 + 用户增删）—— 界面画开关、引擎判前台门，用的都是它。
      */
     val whitelist: StateFlow<Set<String>> = _whitelist.asStateFlow()
+
+    /**
+     * ★★★ 用户**逐个应用指定**的旋转方式（2026-10-05 新增，R2）。
+     *
+     * ★ 界面只读它渲染"四选一"里**当前选中的是哪一个**（[appModeOf] 才是完整答案）；
+     *   引擎**不要**直接读它 —— 走 [modeFor]（它把"跟随全局 / 跟随系统"两档也算进去）。
+     *   ⛔ 别在别处自己查表：漏掉名单那一层，症状就是"用户设了跟随系统却还在转"。
+     */
+    val appModes: StateFlow<Map<String, AppRotateMode>> = _appModes.asStateFlow()
+
+    /**
+     * 生效的**分屏名单**（默认游戏清单 + 用户增删）—— 界面画开关、引擎判"折不折"，用的都是它。
+     *
+     * ★★ 与 [whitelist] **是两份**（用户 2026-10-05 拍板），⛔ 别把两者对齐 / 合并。
+     * ⚠️ 引擎侧读它的位置是 `SplitTrigger.onTrigger` 的前置闸 —— 那是**不可逆动作之前**
+     *   的最后一道，所以这份集合必须"改完立刻生效"（靠派生值 + StateFlow，见 [_splitWhitelist]）。
+     */
+    val splitWhitelist: StateFlow<Set<String>> = _splitWhitelist.asStateFlow()
 
     // ---------------------------------------------------------------- 后端
 
@@ -756,16 +1101,24 @@ object AppPrefs {
                 .putString(PrefsBridge.STRATEGY, _strategy.value.name)
                 .putBoolean(PrefsBridge.HANDOFF_ROTATE, _handoffRotate.value)
                 .putBoolean(PrefsBridge.GATE, _gateEnabled.value)
+                .putBoolean(PrefsBridge.ADAPTIVE_FALLBACK, _r1Fallback.value)
                 .putBoolean(PrefsBridge.EXPERIMENTAL_ADAPTIVE, _experimentalAdaptive.value)
+                .putBoolean(PrefsBridge.EXPERIMENTAL_MULTISPLIT, _experimentalMultiSplit.value)
+                .putString(PrefsBridge.SPLIT_UNFOLD_DIR, _splitUnfoldDir.value.name)
+                .putInt(PrefsBridge.SPLIT_THERMAL_LIMIT_C, _splitThermalLimitC.value)
+                .putBoolean(PrefsBridge.SPLIT_THERMAL_GUARD_OFF, _splitThermalGuardOff.value)
                 .putInt(PrefsBridge.HINT_MS, _hintMs.value)
-            // ★ 实时角度预览**也落盘**（2026-10-01）：它是"跨进程的一次性状态"，
-            //   引擎靠文件读到它。⚠️ 落盘时用的值已被 [init] 复位过（见那边的注释），
-            //   所以这里永远不会把一个"上次没关掉"的 true 又写回去。
-            e.putBoolean(PrefsBridge.ANGLE_PREVIEW, _anglePreview.value)
             // 白名单落成**单个字符串**（`\n` 分隔），理由见 [AppWhitelist.encode]。
             // 一份名单 × 两份（增 / 减）= 2 个键。
             e.putString(PrefsBridge.WHITELIST_ADD, AppWhitelist.encode(_wlAdd.value))
             e.putString(PrefsBridge.WHITELIST_REMOVE, AppWhitelist.encode(_wlDel.value))
+            // ★ 每个应用单独指定的旋转方式（R2）：只装"自适应 / 半自动"两个档，
+            //   另外两档由上面那两行（名单）表达 —— 取舍见 [AppRotateMode] 类注释。
+            e.putString(PrefsBridge.APP_ROTATE_MODES, AppRotateMode.encode(_appModes.value))
+            // ★ 分屏名单：**独立的另一份**（用户 2026-10-05 拍板），同样是"一份名单 × 增/减 2 键"。
+            //   ⚠️ 编码复用 [AppWhitelist.encode]（同一个包名逐行约定，见 [SplitWhitelist] 类注释）。
+            e.putString(PrefsBridge.SPLIT_WHITELIST_ADD, AppWhitelist.encode(_swlAdd.value))
+            e.putString(PrefsBridge.SPLIT_WHITELIST_REMOVE, AppWhitelist.encode(_swlDel.value))
             e.apply()
         }.onFailure { Log.w(TAG, "配置落盘失败", it) }
     }
@@ -784,26 +1137,39 @@ object AppPrefs {
             enumOrNull<CaptureStrategy>(p.getString(PrefsBridge.STRATEGY, null)) ?: CaptureStrategy.POWER_SAVING
         _handoffRotate.value = p.getBoolean(PrefsBridge.HANDOFF_ROTATE, true)
         _gateEnabled.value = p.getBoolean(PrefsBridge.GATE, true)
+        // ★★ R1「环境不可用时降级」（2026-10-05）—— **引擎要读它**（`AdaptiveEngine.mode`
+        //   与 `noteAdaptiveEnv` 都看这一项）⇒ 两条读盘路径成对灌，本处是 App 这一条。
+        _r1Fallback.value = p.getBoolean(PrefsBridge.ADAPTIVE_FALLBACK, true)
         // ★ 实验开关**只在 App 这条路径上读**（2026-10-03）：
         //   它 gates 的是界面上"列不列出自适应那一档"，引擎对此毫无兴趣
         //   ⇒ 刻意**不**进 [applyFromModulePrefs]（那是 SystemUI 进程读 ModulePrefs 的路径）。
         _experimentalAdaptive.value = p.getBoolean(PrefsBridge.EXPERIMENTAL_ADAPTIVE, false)
+        // ★ 「提高分屏上限」（2026-10-06）：与上面那个**不同** —— 它要送到模块侧
+        //   （经快照 → 镜像 → `SplitStageLimit`）⇒ 必须进 persistAll，否则快照里
+        //   没有它、模块永远读到 null。
+        _experimentalMultiSplit.value =
+            p.getBoolean(PrefsBridge.EXPERIMENTAL_MULTISPLIT, false)
+        // ★ 分屏方向：**引擎侧也要读**（将来触发分屏要用它定左右）⇒ 这条 App 路径与
+        //   [applyFromModulePrefs] 那条引擎路径都得灌，漏一条就是"界面改了、引擎没跟上"。
+        //   ⚠️ 用 [enumOrNull] 而不是 `enumValueOf`：文件可能被手改过，不认识的值要退回默认档
+        //     而不是抛异常（这条读盘路径跑在**界面冷启动**上，抛一次就是整个界面起不来）。
+        _splitUnfoldDir.value =
+            enumOrNull<SplitUnfoldDirection>(p.getString(PrefsBridge.SPLIT_UNFOLD_DIR, null))
+                ?: SplitUnfoldDirection.LEFT
+        // ★★ 高温保护两项（2026-10-05）：**引擎侧要读它们**（它据此改写温度观察者的判定）
+        //   ⇒ 两条读盘路径成对灌，本处是 App 这一条（引擎那条见 [applyFromModulePrefs]）。
+        //   ⚠️ 读的时候也夹一次（见 [clampThermalLimitC]）：文件被手改过 / 是从更老的版本
+        //     升级上来的，都可能带着越界值 —— 而这条路径跑在**界面冷启动**上，
+        //     越界值会让「恢复默认」的比对失真，也可能让引擎收到一个没意义的阈值。
+        _splitThermalLimitC.value =
+            clampThermalLimitC(
+                p.getInt(PrefsBridge.SPLIT_THERMAL_LIMIT_C, THERMAL_LIMIT_C_DEFAULT)
+            )
+        _splitThermalGuardOff.value =
+            p.getBoolean(PrefsBridge.SPLIT_THERMAL_GUARD_OFF, false)
         // 读的时候也归一一次：老版本写进去的（如 7927）/ 文件被手改过的值都可能越界或非整秒
         _hintMs.value = snapHintMs(p.getInt(PrefsBridge.HINT_MS, HINT_MS_DEFAULT))
-        // ★ 两条读盘路径都要灌这一个键（App 侧 / 引擎侧各一次）：
-        //   引擎侧那一次才是功能性的（它驱动 collect 去代删 Settings 键），
-        //   App 侧这次是为了"读进来的状态与文件一致"—— 否则界面上的反馈会与真实请求错位。
-        _uncontrollableClearReq.value =
-            p.getString(PrefsBridge.UNCONTROLLABLE_CLEAR, null).orEmpty()
         _hintTestReq.value = p.getString(PrefsBridge.HINT_TEST, null).orEmpty()
-        // ★★ 实时角度预览**在这里强制复位**（2026-10-01）。
-        //
-        //   它是"用户此刻正盯着「方向校准」那一页"的投影，**不该跨进程启动存活**：
-        //   App 崩溃 / 被系统杀掉时会留下一个 true，若下次冷启动照它走，
-        //   引擎就会**在用户根本没打开界面时白开前摄**（耗电 + 可能撞上系统的注视感知）。
-        //   ⇒ 启动时无条件当 false，并让紧随其后的 persistAll() 把这个 false 写回文件。
-        //   ⚠️ 别改成"读进来就用" —— 那样"崩溃一次就多烧一次电"，而且现象很难被发现。
-        _anglePreview.value = false
         // ★ 校准分步进度（2026-10-03）：跨 App 重启存活，这里读回来。
         //   ⚠️ 紧接着的 `refreshCalibFromSettings()` 会按系统状态再对齐一次
         //     （见那边的注释），所以这里不需要额外的合法性判断。
@@ -862,6 +1228,23 @@ object AppPrefs {
             // —— 功能整体删除后留下的值 ——
             "unfold_default_inner",      // 「展开后的方向」固化值（10-03 整个功能删除）
             "slot_set",                  // 第一版「默认方向」的请求键（10-03 改为 root 直写）
+            "angle_preview",             // 「实时角度预览」开关（10-04 整条链删除，见 docs/死代码清理_*）
+            //   ⚠️ 用字面量、⛔ 别写回 `PrefsBridge.ANGLE_PREVIEW` —— 那个常量已随功能删除，
+            //      写成常量编译就过不了；而且孤儿键的判据本来就是"没有代码再引用这个名字"。
+            //   ⚠️ 漏了它的后果（2026-10-04 装机实测）：值一直躺在 prefs 里 ⇒ 每次全量快照都带着它
+            //      ⇒ 引擎镜像恒为 16 个键（正确应是 15），将来排查时会误以为"还有代码在读它"。
+            // —— 分屏「角度校准」整条链删除（10-06，用户口径"不给这么多自定义功能"），见
+            //    docs/分屏增强_触发收紧与删除角度校准_* ——
+            "split_calib",               // 用户标定出来的阈值串（实测值 `12.0|5.0|85.0|1500`）
+            "split_calib_done",          // 「已校准」完成标记
+            "split_calib_req",           // 「开始校准」请求键（值是一个时间戳）
+            //   ⚠️ 同样是**装机实测**撞见的（10-06 05:16 软重启后读镜像）：三个键都还在
+            //      ⇒ 快照恒 28 个键（正确应是 25），和 `angle_preview` 那次是同一个坑。
+            //   ⚠️ `split_calib_req` 还**多一层**：它不在 [REQUEST_ONLY_KEYS] 里之后，升级安全网
+            //      会把它当"设置"从镜像搬回 prefs —— 所以这里必须清，否则每装一次新版本就复活一次。
+            //   ⛔ 别把旋转的标定键混进来：`calib_req` / `calib_step1_done` / `calib_step2_done`
+            //      仍在用（那些是**方向**的标定，和折角无关）。
+            //      （`calib_sign` / `calib_offset` 另在上面单列：它们已搬到 `Settings.System`。）
             // —— 旧"按屏两份名单"的其余三份（09-29 收成一层后作废；实测都是空的）——
             "app_whitelist_add_inner",
             "app_whitelist_add_outer",
@@ -895,11 +1278,14 @@ object AppPrefs {
      *   值**没变**所以引擎不会动（无害），但「文件被清空一次、这些键同时被搬回」
      *   就会凭空触发一轮动作。用户的配置里**没有**「我上次点过标定」这一项，
      *   所以它们本来就不该算「要保留的设置」。
+     *
+     * ⚠️ 它同时也是那条**判据**的一部分（见 [adoptConfigFromMirrorIfNeeded] 的 ③）：
+     *   算「本地缺了哪些镜像有的键」时要**跳过**这些键 —— 否则一个请求键就足以
+     *   把本地判成"影子"，从而把整份镜像搬回来。
      */
     private val REQUEST_ONLY_KEYS = setOf(
         PrefsBridge.CALIB_REQ,
         PrefsBridge.HINT_TEST,
-        PrefsBridge.UNCONTROLLABLE_CLEAR,
         PrefsBridge.BREAKER_RESET,
     )
 
@@ -1086,21 +1472,31 @@ object AppPrefs {
         enumOrNull<CaptureStrategy>(p.getString(PrefsBridge.STRATEGY, null))?.let { _strategy.value = it }
         _handoffRotate.value = p.getBoolean(PrefsBridge.HANDOFF_ROTATE, true)
         _gateEnabled.value = p.getBoolean(PrefsBridge.GATE, true)
+        // ★★ R1（2026-10-05）—— **这一条才是功能性的那条**：引擎进程靠它决定
+        //   "读不到人脸时要不要临时降成半自动"（`AdaptiveEngine.noteAdaptiveEnv`）。
+        //   ⚠️ 与 [reloadFromPrefs] 那条**成对**，漏一条 = 界面改了、引擎还按旧值走。
+        _r1Fallback.value = p.getBoolean(PrefsBridge.ADAPTIVE_FALLBACK, true)
+        // ★ 「2 分屏展开方向」也走这一条引擎路径（与 [reloadFromPrefs] 那条**成对**）。
+        //   它是引擎将来要读的配置，不是界面专有的可见性开关 —— 判据见
+        //   [PrefsBridge.SPLIT_UNFOLD_DIR]（⛔ 别拿 "experimental_adaptive 不进这里" 当反例：
+        //   那一个不进是因为**引擎对界面可见性毫无兴趣**，本键恰恰相反）。
+        _splitUnfoldDir.value =
+            enumOrNull<SplitUnfoldDirection>(p.getString(PrefsBridge.SPLIT_UNFOLD_DIR, null))
+                ?: SplitUnfoldDirection.LEFT
+        // ★★ 高温保护两项（2026-10-05）—— **这一条才是功能性的那条**：引擎进程靠它拿到
+        //   用户设的温度上限与"要不要关掉保护"（`SplitTrigger` 从 `AppPrefs` 读这两个流）。
+        //   ⚠️ 与 [reloadFromPrefs] 那条**成对**，漏一条 = 界面改了、引擎还按 47°C 走。
+        //   ⚠️ 同样夹一次（理由见 [reloadFromPrefs] 那一处）。
+        _splitThermalLimitC.value =
+            clampThermalLimitC(
+                p.getInt(PrefsBridge.SPLIT_THERMAL_LIMIT_C, THERMAL_LIMIT_C_DEFAULT)
+            )
+        _splitThermalGuardOff.value =
+            p.getBoolean(PrefsBridge.SPLIT_THERMAL_GUARD_OFF, false)
         // 读的时候也归一一次：老版本写进去的（如 7927）/ 文件被手改过的值都可能越界或非整秒
         _hintMs.value = snapHintMs(p.getInt(PrefsBridge.HINT_MS, HINT_MS_DEFAULT))
-        // ★ 清除请求必须在这里灌进内存流 —— 引擎侧 `collect` 它才会去代删 Settings 键。
-        //   这一行就是"App 点一下清除 ⇒ 引擎毫秒级收到"的**唯一通道**（理由见
-        //   [PrefsBridge.UNCONTROLLABLE_CLEAR]：App 没有 WRITE_SETTINGS，删不了那个键）。
-        _uncontrollableClearReq.value =
-            p.getString(PrefsBridge.UNCONTROLLABLE_CLEAR, null).orEmpty()
         // ★ 预览请求同样要灌进内存流 —— 引擎侧 `collect` 它才会弹按钮。
         _hintTestReq.value = p.getString(PrefsBridge.HINT_TEST, null).orEmpty()
-        // ★★ 实时角度预览（2026-10-01）：**这里是引擎侧那一次读盘**，它才是有下游的那次
-        //   （引擎 `collect` 它来启停前摄采样）。
-        //   ⚠️ 首次立即重放的可能是"上次没关掉"的 true —— 过滤那道闸在引擎里
-        //     （`setAnglePreview` 的冷启动分支），不放这里：AppPrefs 分不清
-        //     "这是启动时的重放"还是"用户真的刚打开"，引擎那边有明确的一次性时机。
-        _anglePreview.value = p.getBoolean(PrefsBridge.ANGLE_PREVIEW, false)
         loadWhitelist { k -> p.getString(k, null) }
 
         _configOk.value = p.available
@@ -1109,11 +1505,27 @@ object AppPrefs {
 
     // ================================================================ 应用白名单
 
-    /** 读两份集合（用统一的取值函数，App / 引擎两条读盘路径共用） */
+    /**
+     * 读**两份名单、四个集合**（用统一的取值函数，App / 引擎两条读盘路径共用）。
+     *
+     * ★★ 2026-10-05 起这一个函数管**两个功能的名单**（旋转那份 + 分屏那份）——
+     *   它们共用"一份名单 = add 集 + remove 集"这个形状，而且共用同一个取值函数
+     *   ⇒ 合成一个装载点能让"两条读盘路径"自动覆盖两边，**不会出现只加了一条路**。
+     *   ⚠️ 但**两份集合本身刻意不合并**（用户拍板，见 [SplitWhitelist] 类注释）。
+     */
     private fun loadWhitelist(get: (String) -> String?) {
         _wlAdd.value = AppWhitelist.decode(get(PrefsBridge.WHITELIST_ADD))
         _wlDel.value = AppWhitelist.decode(get(PrefsBridge.WHITELIST_REMOVE))
         refreshWhitelist()
+        // ★★ 每个应用单独指定的旋转方式（R2，2026-10-05）：它必须紧跟上面那两行 ——
+        //   "跟随系统 / 跟随全局"两档的答案来自名单，另两档来自这个 map，
+        //   两者合起来才是"这个应用该用哪一档"（见 [appModeOf]）。
+        //   ⚠️ 放本函数里 ⇒ **两条读盘路径（App / 引擎）自动都覆盖**，不会只加了一条。
+        _appModes.value = AppRotateMode.decode(get(PrefsBridge.APP_ROTATE_MODES))
+        // ★ 分屏名单（另一份，别和上面那两行搞混）：编码同样是 [AppWhitelist.encode]。
+        _swlAdd.value = AppWhitelist.decode(get(PrefsBridge.SPLIT_WHITELIST_ADD))
+        _swlDel.value = AppWhitelist.decode(get(PrefsBridge.SPLIT_WHITELIST_REMOVE))
+        refreshSplitWhitelist()
     }
 
     /**
@@ -1176,9 +1588,209 @@ object AppPrefs {
      *   恢复默认不该把它抹掉。
      */
     fun resetWhitelistRemovals(): Boolean {
-        if (_wlDel.value.isEmpty()) return false
+        // ★★ 2026-10-05（R2 四选一上线时补）：**必须连 [_appModes] 一起清**。
+        //   理由是一条真实的漏洞 —— [setAppRotateMode] 选「自适应 / 半自动」时**会往
+        //   `_wlDel` 写那个包名**（"把这个应用从名单里摘出来"），而点名记录本身在
+        //   [_appModes] 里。只清 `_wlDel` 的话：名单确实回到出厂了，但
+        //   [appModeOf] ① 仍然命中那条记录 ⇒ **档位一个字都没变**。
+        //   用户看到的是"点了恢复默认，那个应用还是自适应"。
+        val hadDel = _wlDel.value.isNotEmpty()
+        val hadModes = _appModes.value.isNotEmpty()
+        // ⚠️ 两个都空才算"没东西可恢复"——只看 `_wlDel` 会让"只点过档位"的用户
+        //   点了按钮却什么都不发生（而界面上那个按钮是真的该起作用）。
+        if (!hadDel && !hadModes) return false
         _wlDel.value = emptySet()
         refreshWhitelist()
+        _appModes.value = emptyMap()
+        persistAll()
+        return true
+    }
+
+    // ------------------------------------------------ 每个应用单独适配（R2，2026-10-05）
+
+    /**
+     * 这个应用**在界面上应该显示成哪一档**（四选一里的选中项）。
+     *
+     * 判据（**两层的合成，顺序有意义**）：
+     * ```
+     * ① [_appModes] 里点名了          ⇒ 就是它（自适应 / 半自动）
+     * ② 命中生效名单                   ⇒ 跟随系统
+     * ③ 否则                           ⇒ 跟随全局
+     * ```
+     * ★ ① 优先于 ②：被点名成"自适应"的应用**同时**不会被名单命中 ——
+     *   [setAppRotateMode] 写过 ① 的包一定不在名单里（它会把那个包从名单里摘掉）。
+     *   两道都留着只为"文件被手改过"这种情形兜底，正常路径上不会打架。
+     *
+     * ⚠️ **界面用它画选中项、[modeFor] 用它算引擎档**：两处必须是同一个判据，
+     *   否则会出现"界面显示跟随系统、引擎却在自适应"这种最难查的分歧。
+     */
+    fun appModeOf(pkg: String?): AppRotateMode {
+        if (pkg.isNullOrEmpty()) return AppRotateMode.FOLLOW_GLOBAL
+        _appModes.value[pkg]?.let { return it }
+        return if (pkg in _whitelist.value) AppRotateMode.SYSTEM else AppRotateMode.FOLLOW_GLOBAL
+    }
+
+    /**
+     * ★★★ **引擎侧唯一入口**：这个前台应用该按哪一档干活。
+     *
+     * 它替代了引擎里原来那 14 处 `AppPrefs.mode.value` 读点（R2 之前"全局一档管所有应用"）。
+     *
+     * 判据（顺序有意义）：
+     * ```
+     * ① 外屏 ⇒ 恒 SYSTEM      —— 外屏的旋转增强已整体删除（见 [modeOf]），一个字都不能写
+     * ② 点名过 ⇒ 那一档
+     * ③ 命中名单 ⇒ SYSTEM
+     * ④ 否则 ⇒ 全局档（[_modeInner]）
+     * ```
+     * ★ ③ 与 [isWhitelisted] **必须是同一个集合**：前台门（"要不要停手"）判的就是它
+     *   ⇒ 两处若用不同集合，会出现"门停了手、档却还在自适应"（引擎白跑一轮相机）。
+     *   ⚠️ 这正是"跟随系统"这一档**不落 [PrefsBridge.APP_ROTATE_MODES]** 的原因。
+     *
+     * @param pkg 前台包名；`null` / 空 = 读不到 ⇒ 回落到**全局档**
+     *   （判错方向的代价不对称：读不到就按用户设的全局档干活，比"凭空停手"安全）
+     */
+    fun modeFor(pkg: String?): RotateMode {
+        if (_form.value != ScreenForm.INNER) return RotateMode.SYSTEM
+        if (!pkg.isNullOrEmpty()) {
+            _appModes.value[pkg]?.mode?.let { return it }
+            if (pkg in _whitelist.value) return RotateMode.SYSTEM
+        }
+        return _modeInner.value
+    }
+
+    /**
+     * 是否有**任何一档需要引擎介入**（引擎启停 / 形态切换 / 前台巡检的判据）。
+     *
+     * ============================ 为什么不能只看全局档 ============================
+     * R2 之后可能出现「全局档 = 跟随系统，但某个应用被点名成自适应」——
+     * 那时全局档是 [RotateMode.SYSTEM]（[RotateMode.engages] = false），
+     * 只看它会**整个引擎都不启动**，用户在那个应用里的点名等于没设。
+     *
+     * ⚠️ 第二条（外屏恒 false）不是冗余：外屏的点名**必须不生效**（见 [modeFor] ①），
+     *   否则引擎会在外屏打开并 `engageTakeover` 关掉系统的自动旋转 ——
+     *   而外屏写 `user_rotation` 本来就无效（`ignoreOrientationRequest=false`）
+     *   ⇒ 用户看到的是"屏幕彻底转不动了"。这是本工程踩过的那个坑，别再来一次。
+     */
+    val engagesAny: Boolean
+        get() = when {
+            _mode.value.engages -> true
+            _form.value != ScreenForm.INNER -> false
+            else -> _appModes.value.values.any { it.mode?.engages == true }
+        }
+
+    /**
+     * 改某个应用的旋转方式（**界面唯一入口**，四选一）。
+     *
+     * ============================ 它同时动两处（刻意） ============================
+     * | 选的档 | 名单那两层（add / remove） | [PrefsBridge.APP_ROTATE_MODES] |
+     * |---|---|---|
+     * | 跟随系统 | **进名单**（能被前台门识别为"停手"） | 清掉该包 |
+     * | 另外三档 | **出名单** | 只有自适应 / 半自动留下记录 |
+     *
+     * ★ 为什么名单那两层必须跟着动：前台门的判据就是它（[isWhitelisted]）——
+     *   只改 `_appModes` 而名单不动的话，一个"点名成自适应"的应用若恰好命中默认清单
+     *   （游戏 / 长视频），前台门会**继续停手**，而 `modeFor` 却返回自适应
+     *   ⇒ 两个判据打架，症状是"设了自适应但那个应用完全没反应"。
+     *
+     * ⚠️ 不做"默认清单项不必进名单"那种归约：名单是**现算**的（[AppWhitelist.resolve]），
+     *   所以"把一个默认项改成跟随全局"必须真的往 `_wlDel` 写一个包名，
+     *   否则下一次现算又会被默认值顶回来。理由与 [setAppWhitelisted] 逐字相同。
+     *
+     * @return 是否真的发生了变化（false = 用户点的状态本来就成立）
+     */
+    internal fun setAppRotateMode(pkg: String, m: AppRotateMode): Boolean {
+        if (pkg.isBlank()) return false
+        if (appModeOf(pkg) == m) return false
+
+        val inList = m == AppRotateMode.SYSTEM
+        val add = _wlAdd.value.toMutableSet().apply { remove(pkg); if (inList) add(pkg) }
+        val del = _wlDel.value.toMutableSet().apply { remove(pkg); if (!inList) add(pkg) }
+        val modes = _appModes.value.toMutableMap().apply {
+            if (m.stored) put(pkg, m) else remove(pkg)
+        }
+
+        _wlAdd.value = add
+        _wlDel.value = del
+        refreshWhitelist()
+        _appModes.value = modes
+        persistAll()
+        return true
+    }
+
+    // ================================================================ 分屏名单（2026-10-05）
+
+    /**
+     * 由 [_swlAdd] / [_swlDel] 重算生效分屏名单。**唯一的写入点** ——
+     * 任何改到那两个流的地方都必须调它，否则引擎下次折叠用的还是旧集合。
+     *
+     * ★ 形状与 [refreshWhitelist] 逐字相同（同一个"只在真变了才赋值"的取舍）。
+     * ⚠️ **但它算的是另一份集合**（[SplitWhitelist.resolve]），⛔ 别为了省事把两个
+     *   refresh 合并成一个 —— 它们的输入输出都是两套。
+     */
+    private fun refreshSplitWhitelist() {
+        val next = SplitWhitelist.resolve(_swlAdd.value, _swlDel.value)
+        if (next != _splitWhitelist.value) _splitWhitelist.value = next
+    }
+
+    /**
+     * 开关某个应用的**分屏豁免**。**分屏名单界面的唯一入口**。
+     *
+     * ★ 语义与 [setAppWhitelisted] **相反方向地"同名"**，读之前先记这条：
+     *   - [setAppWhitelisted] 的 `on = true` ⇒ 该应用**不受旋转控制**（停手）；
+     *   - 本函数的 `on = true` ⇒ 该应用**折一下也不分屏**（同样是一种"停手"）。
+     *   ⇒ 两个开关在界面上都表现为"打开 = 别动它"，用户心智是一致的；
+     *     但落的是**两份不同的集合**（用户 2026-10-05 拍板），⛔ 别互相写。
+     *
+     * ★ `on` 落到 `add`、`off` 落到 `del`，并把同一个包在另一份里的记录清掉
+     *   —— 逐字同 [setAppWhitelisted]，理由不再重复。
+     *
+     * @return 是否真的发生了变化（false = 用户点的状态本来就成立）
+     */
+    internal fun setSplitWhitelisted(pkg: String, on: Boolean): Boolean {
+        if (pkg.isBlank()) return false
+        val before = pkg in _splitWhitelist.value
+        val add = _swlAdd.value.toMutableSet().apply { remove(pkg); if (on) add(pkg) }
+        val del = _swlDel.value.toMutableSet().apply { remove(pkg); if (!on) add(pkg) }
+        if (before == (pkg in SplitWhitelist.resolve(add, del))) return false
+
+        _swlAdd.value = add
+        _swlDel.value = del
+        refreshSplitWhitelist()
+        persistAll()
+        return true
+    }
+
+    /**
+     * 引擎侧判据：这个前台包**折一下要不要加分屏**。
+     *
+     * @return true = 命中名单 ⇒ **不加**（放过用户正在全屏用的那个应用）。
+     *
+     * ★ 与 [isWhitelisted] 的**关键差异**：读不到包名（`null` / 空）时这里返回 **false**
+     *   —— 也就是"**照常加分屏**"。这与 [ForegroundGate.Decision.UNKNOWN] 那条
+     *   "读不到就不下结论"的取舍**刻意相反**，理由：
+     *   - 旋转那边"读不到 ⇒ 停手"是对的，因为停手的代价只是少转一次屏；
+     *   - 这边"读不到 ⇒ 停手"会让用户**折了没反应**，而且他没有任何办法自查
+     *     （"是不是我名单配错了？" —— 其实是读不到）⇒ 判错方向的代价不对称，
+     *     宁可多分一次屏（可撤销：用户按一下返回 / 退出分屏就回来了），
+     *     也不要让他以为功能坏了。
+     *   ⚠️ 这个取舍有代价：读不到前台包时，游戏也可能被分屏。接受 ——
+     *     因为"读不到"在 SystemUI 进程里是**罕见**的（它有 REAL_GET_TASKS），
+     *     而"折了没反应"是用户每天都会遇到的观感。
+     */
+    fun isSplitWhitelisted(pkg: String?): Boolean {
+        if (pkg.isNullOrEmpty()) return false
+        return pkg in _splitWhitelist.value
+    }
+
+    /**
+     * 清掉「用户手动移出」的记录，让默认游戏清单重新生效（界面上的"恢复默认"按钮）。
+     *
+     * ★ 只清 `del`、**不动 `add`** —— 逐字同 [resetWhitelistRemovals]。
+     */
+    fun resetSplitWhitelistRemovals(): Boolean {
+        if (_swlDel.value.isEmpty()) return false
+        _swlDel.value = emptySet()
+        refreshSplitWhitelist()
         persistAll()
         return true
     }
@@ -1313,6 +1925,17 @@ object AppPrefs {
     }
 
     /**
+     * 开关「自适应读不到环境时降级半自动」（R1，2026-10-05）。
+     *
+     * ★ 与 [setGateEnabled] 逐字同形（改内存流 + 落盘）—— 它同样要被引擎实时跟随，
+     *   配置通道支持实时下发，所以不需要"重启引擎才生效"那套。
+     */
+    fun setR1Fallback(v: Boolean) {
+        _r1Fallback.value = v
+        prefs?.edit()?.putBoolean(PrefsBridge.ADAPTIVE_FALLBACK, v)?.apply()
+    }
+
+    /**
      * 开关「实验功能 → 自适应旋转」（2026-10-03）。
      *
      * ★★ **它只改可见性，一个字都不碰 [modeInner]。** 这一点是刻意的，两个方向都别改：
@@ -1330,6 +1953,79 @@ object AppPrefs {
     }
 
     /**
+     * 开 / 关「提高分屏上限」（2026-10-06）。
+     *
+     * ============================ 它为什么是 suspend、还返回 Boolean ============================
+     * 这个开关的值**必须让引擎（SystemUI）在进程起来的第一个毫秒读到**：
+     * 实测截止线是 `MultipleSplitStageOrderOperator.<init>` 的 Δ404 ms，而走
+     * `Settings.System` 那条路要 Δ4.6 s 才拿得到（日志表在 [PrefsBridge.PROP_MULTISPLIT]）。
+     * ⇒ 值得落进 `persist.*` 属性，而**属性只有 root 能写**
+     *   （[cn.dsr213.hyperplus.RootShell.putProp]）⇒ 这一步必然要等一个 su 进程。
+     *
+     * ★★ **写成功才改状态** —— 这是本方法唯一的不变式：
+     *   属性写不进去 = 引擎永远读不到 = 用户开到天亮也不会生效。
+     *   所以先借 root 写 + **读回校验**，只有真的写成了才更新内存流与落盘；
+     *   失败就**一个字都不改**，由界面如实告诉他「没生效、去授权」。
+     *   ⛔ 别为了「界面手感」先开起来再补写 —— 那正是「开着但没生效」这个坑的形状，
+     *     也正是这次改造要根除的那个病。
+     *
+     * ⚠️ **关也要 root**：关闭时要把属性写成 `"0"`（而**不是**删掉它）——
+     *   删掉的话引擎会回落去读镜像，而镜像那边还留着旧的「开」，等于关不掉。
+     *   所以两个方向都要过 root；失败时状态同样保持原样。
+     *
+     * ⚠️ 这里**不去动 SystemUI**：重启由界面上的说明与设置页那个按钮交给用户做
+     *   （本应用没有替用户重启系统界面的道理，那会打断他正在做的事）。
+     *
+     * @return 是否真的生效。**false 时本方法不改任何状态**。
+     */
+    suspend fun applyExperimentalMultiSplit(want: Boolean): Boolean {
+        val ok = RootShell.putProp(PrefsBridge.PROP_MULTISPLIT, if (want) "1" else "0")
+        if (!ok) return false
+        _experimentalMultiSplit.value = want
+        prefs?.edit()?.putBoolean(PrefsBridge.EXPERIMENTAL_MULTISPLIT, want)?.apply()
+        return true
+    }
+
+    /**
+     * 设「2 分屏展开方向」（用户 2026-10-04 点名）。
+     *
+     * ★ 与 [setMode] / [setStrategy] 同型：先更新内存流（界面**同帧**跟上），再落盘
+     *   —— 落盘之后那条 [scheduleConfigPush] 会自动把新快照推给引擎，这里不需要额外动作。
+     *
+     * ⚠️ 早期返回那道 `if` **不是**可有可无的优化：`SharedPreferences` 只在**值真的变了**时
+     *   才回调监听器，而这里若无条件写，重复点同一个档位会写一次盘却不触发推送 ——
+     *   盘上内容与引擎镜像就会被一次真正的推送"意外对齐"，掩盖掉别处真正的漏推。
+     *   保持"值没变就一个字节都不写"，与其它 setter 的纪律一致（见 [setMode] 的写法）。
+     */
+    fun setSplitUnfoldDir(v: SplitUnfoldDirection) {
+        if (_splitUnfoldDir.value == v) return
+        _splitUnfoldDir.value = v
+        prefs?.edit()?.putString(PrefsBridge.SPLIT_UNFOLD_DIR, v.name)?.apply()
+    }
+
+    /**
+     * 「到上限」提示的**已读游标**（毫秒时刻）—— 最后一次**已经给用户看过的**回报。
+     *
+     * ★★ 它必须落盘（理由见 [PrefsBridge.SPLIT_LIMIT_SEEN]）：用户折手机时人在分屏里、
+     *   不在本 App 上 ⇒ 界面上那一瞬间的提示**根本送不出去**。落盘之后，
+     *   下次打开 App 会把"错过的那一条"补上。
+     * ⚠️ 纯读 + `runCatching`：它跑在界面冷启动路径上，读盘失败也只是退化成"可能重弹一次"。
+     */
+    fun splitLimitSeen(): Long =
+        runCatching { prefs?.getLong(PrefsBridge.SPLIT_LIMIT_SEEN, 0L) ?: 0L }.getOrDefault(0L)
+
+    /**
+     * 记下"这条「到上限」回报已经给用户看过了"。
+     * ⚠️ 只**前进**不后退（`maxOf`）：界面若因并发读到旧值，不该把游标往回拨 ——
+     *   往回拨的后果是**同一条提示反复弹**，而"重复打扰"的代价是用户连真的提示也不看了。
+     */
+    fun markSplitLimitSeen(stampMs: Long) {
+        if (stampMs <= splitLimitSeen()) return
+        prefs?.edit()?.putLong(PrefsBridge.SPLIT_LIMIT_SEEN, stampMs)?.apply()
+        Log.i(TAG, "已记下「到上限」提示已读：stamp=$stampMs")
+    }
+
+    /**
      * 设半自动按钮的等待时长（毫秒）。
      *
      * ★ 在这里**统一夹紧 + 对齐整秒**（见 [snapHintMs]），而不是只靠界面滑条约束：
@@ -1343,38 +2039,49 @@ object AppPrefs {
     }
 
     /**
-     * 开/关「实时角度预览」（界面进/出「方向校准」时调）。
+     * 设**多分屏的高温保护阈值**（摄氏度）—— 界面输入框的唯一入口。
      *
-     * ★ 为什么**相等就早退**：这一页每次重组都会走一遍 [DisposableEffect]，
-     *   `prefs.edit().commit` 是有真实代价的（写文件 + fsync）；
-     *   而引擎那边也靠"值真的变了"来决定启停采样 —— 反复写同一个值会让它来回开销。
+     * ★ 与 [setHintMs] 同型：在这里**统一夹紧**（见 [clampThermalLimitC]），
+     *   而不是只靠输入框的键盘过滤器 —— 用户可能粘一串字、也可能是从文件里改的。
+     *
+     * ⚠️ 与 [setSplitUnfoldDir] 同型：值没变就**一个字节都不写**（理由见那边的注释）——
+     *   无条件写会"意外对齐"盘上内容与引擎镜像，掩盖掉别处真正的漏推。
+     *
+     * ⚠️ 改它**不影响** [splitThermalGuardOff]：那是另一个开关（语义见
+     *   [PrefsBridge.SPLIT_THERMAL_GUARD_OFF]），⛔ 别在这里顺手把它关掉。
      */
-    fun setAnglePreview(on: Boolean) {
-        if (_anglePreview.value == on) return
-        _anglePreview.value = on
-        prefs?.edit()?.putBoolean(PrefsBridge.ANGLE_PREVIEW, on)?.apply()
-        Log.i(TAG, "实时角度预览：${if (on) "开启" else "关闭"}")
+    fun setSplitThermalLimitC(v: Int) {
+        val clamped = clampThermalLimitC(v)
+        if (_splitThermalLimitC.value == clamped) return
+        _splitThermalLimitC.value = clamped
+        prefs?.edit()?.putInt(PrefsBridge.SPLIT_THERMAL_LIMIT_C, clamped)?.apply()
+        Log.i(TAG, "高温保护阈值已设为：$clamped°C")
     }
 
     /**
-     * ★ 请求清除「实测不可控」名单（A 方案的自救出口）。
+     * **恢复默认温度上限**（＝回到厂商出厂的 47°C）。
      *
-     * ============================ 为什么 App 不自己删 ============================
-     * 名单存在 `Settings.System`（[Uncontrollable.KEY]），而**删除也要写权限** ——
-     * App 的清单里**没有 `WRITE_SETTINGS`**（见 [PrefsBridge] 类注释：往非公开键里写
-     * 只认 SYSTEM / SHELL / ROOT uid 与特权包）。所以这里只做两件事：
-     *   ① 往自己 prefs 写一个新时间戳（引擎读得到）；
-     *   ② 同时更新内存流，界面上可以立刻给反馈。
-     * 真正的删除由引擎代劳（它是特权包）。
-     *
-     * ★ 为什么必须给这个出口：这条名单是**观测结论，不是永恒事实** ——
-     *   系统更新、应用更新、用户改了该应用的方向设置，都可能让它失效。
-     *   没有出口的话，一旦误记就是**永久**的"这个应用在外屏永远不弹按钮"，且无从自查。
+     * ★ 为什么单独给它一个函数、而不是让界面调 `setSplitThermalLimitC(DEFAULT)`：
+     *   语义不同。"恢复默认"是**用户明确表达的一个动作**（他不会去想默认值是多少），
+     *   把它写成 `set…(常量)` 会让界面出现一个"看起来能点的按钮，
+     *   但点之前得先知道 47 这个数"的循环。
+     * ⚠️ 它**只动上限**，不碰那个"关掉保护"的开关 —— 用户的意图是"回到出厂的保护水平"，
+     *   而"关掉保护"是他自己另外打开的另一件事（⛔ 别顺手替他关掉，那是加剧风险）。
      */
-    fun requestUncontrollableClear() {
-        val v = System.currentTimeMillis().toString()
-        _uncontrollableClearReq.value = v
-        prefs?.edit()?.putString(PrefsBridge.UNCONTROLLABLE_CLEAR, v)?.apply()
+    fun resetSplitThermalLimitC() = setSplitThermalLimitC(THERMAL_LIMIT_C_DEFAULT)
+
+    /**
+     * 设**是否关掉多分屏的高温保护** —— 只有用户在**二次确认弹窗**里点了确认才该调。
+     *
+     * 🔴 这是本模块唯一一处"拆掉厂商安全保护"的开关，风险说明见
+     *   [PrefsBridge.SPLIT_THERMAL_GUARD_OFF]。**界面的确认弹窗不是可选项** ——
+     *   ⛔ 别为了"少点一下"直接调它、也别做"记住选择"的免确认。
+     */
+    fun setSplitThermalGuardOff(v: Boolean) {
+        if (_splitThermalGuardOff.value == v) return
+        _splitThermalGuardOff.value = v
+        prefs?.edit()?.putBoolean(PrefsBridge.SPLIT_THERMAL_GUARD_OFF, v)?.apply()
+        Log.i(TAG, "多分屏高温保护已${if (v) "关闭（用户确认过）" else "恢复"}")
     }
 
     /**
@@ -1386,7 +2093,7 @@ object AppPrefs {
      *   ⇒ 装机后想看一眼按钮长什么样，只能靠人把手机转一下 —— 调一次外观转一次手机，
      *     这不可接受（按钮材质是本工程被反复调整的一项）。
      *
-     * ★ 与 [requestCalibration] / [requestUncontrollableClear] **同一个套路**：写一个新时间戳
+     * ★ 与 [requestCalibration] **同一个套路**：写一个新时间戳
      *   到自己的 prefs，引擎靠"值变了"驱动；不复位（引擎写不了 App 的私有文件）。
      *   ⚠️ 引擎侧因此必须"冷启动首次只记账"，否则每次软重启 SystemUI 都会凭空弹一个按钮。
      *

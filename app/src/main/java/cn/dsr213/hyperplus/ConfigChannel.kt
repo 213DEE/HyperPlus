@@ -34,7 +34,7 @@ import android.util.Log
  * ★ 为什么推**全量快照**而不是"改了哪个键"：
  *   与原来那条轮询链路的判据一致（`ModulePrefs` 的订阅者比的都是**整体快照**），
  *   而且请求类键（[PrefsBridge.CALIB_REQ] / [PrefsBridge.HINT_TEST] /
- *   [PrefsBridge.UNCONTROLLABLE_CLEAR] / [PrefsBridge.BREAKER_RESET]）本来就是
+ *   [PrefsBridge.BREAKER_RESET]）本来就是
  *   "值变了一个新高"驱动的 —— 全量快照天然把这件事表达清楚，不需要额外协议。
  *
  * ★ 为什么引擎还要往 `Settings.System` 落一份：

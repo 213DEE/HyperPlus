@@ -38,7 +38,10 @@ import kotlinx.coroutines.withContext
  * Box
  *  ├─ NavDisplay（被 layerBackdrop 捕获 ⇒ 它画的内容就是玻璃的模糊源）
  *  │    ├─ 主页 功能 / 设置
- *  │    └─ 二级 旋转增强（含应用名单）/ 当前状态 / 诊断 / 关于
+ *  │    ├─ 二级 旋转增强 / 分屏增强 / 实验功能
+ *  │    │      当前状态 / 诊断 / 语言 / 关于 / 权限管理
+ *  │    └─ 三级 应用名单（旋转）· 应用名单（分屏）· 运行记录（诊断）
+ *  │           —— 2026-10-06，分别从「旋转增强」「分屏增强」「诊断」进
  *  └─ LiquidGlassBar（浮在底部，读取上面那层被捕获的内容）
  * ```
  *
@@ -203,21 +206,30 @@ fun HyperPlusApp(
                 .then(if (backdrop != null) Modifier.layerBackdrop(backdrop) else Modifier),
         ) {
             entry<Route.Function> {
+                // ★ 2026-10-06：`probed` / `hosted` / `hostState` 三个参数**已从这里去掉** ——
+                //   功能页上的「引擎状态格」搬去了「设置」页（用户原话：「把功能首页的
+                //   "运行中"挪进设置」）⇒ 目录层不再需要任何状态输入。
                 FunctionPage(
                     appVersion = appVersion,
+                    onOpen = ::go,
+                )
+            }
+            entry<Route.Settings> {
+                // ★ 同一轮里，那三个参数搬到了这里（状态格的新家）。
+                SettingsPage(
                     probed = probed,
                     hosted = hosted,
                     hostState = hostState,
                     onOpen = ::go,
                 )
             }
-            entry<Route.Settings> {
-                SettingsPage(hostState = hostState, onOpen = ::go)
-            }
             entry<Route.Rotation> {
                 RotationPage(
                     onBack = { backStack.removeLastOrNull() },
                     onOpenSettings = onOpenSettings,
+                    // ★ 2026-10-06：三级页「应用名单」的出口（名额从页内一张长名单
+                    //   收成一行入口）。用 `::go` 复用外壳那个统一的路由函数。
+                    onOpen = ::go,
                 )
             }
             entry<Route.Status> {
@@ -232,6 +244,7 @@ fun HyperPlusApp(
                 DiagnosticsPage(
                     onBack = { backStack.removeLastOrNull() },
                     hostState = hostState,
+                    onOpen = ::go,
                 )
             }
             entry<Route.About> {
@@ -248,6 +261,19 @@ fun HyperPlusApp(
                     onRecreate = onRecreate,
                 )
             }
+            // ★ 2026-10-05 新增：权限管理（入口在「设置」页）。
+            //   ⚠️ 它**必须**拿到 `hostState` —— 三项检查里有两项（LSPosed / 修改系统设置）
+            //   的判据就是 `ModuleLink.State` 的字段，别的来源都给不出真值
+            //   （理由见 `PermissionsPage` 类注释里那张判据表）。
+            //   ⛔ 不要在这里做任何"进页面就顺手探测一次"的额外动作：探测的触发点是
+            //     页内那个 `probeTick`（首帧一次 + 「重新检测」按钮），
+            //     root 探测会弹授权框，多探一次就多弹一次。
+            entry<Route.Permissions> {
+                PermissionsPage(
+                    hostState = hostState,
+                    onBack = { backStack.removeLastOrNull() },
+                )
+            }
             // ★ 2026-10-03 新增：实验功能（入口在「功能」主页最底下）。
             //   ⚠️ 它**不需要** AppLocale / onRecreate 那一套，也不需要宿主的状态
             //   （probed / hosted / hostState）—— 它只读自己那个开关。
@@ -255,6 +281,35 @@ fun HyperPlusApp(
             //   **不依赖引擎**（开关只影响界面），显示引擎状态反而会误导。
             entry<Route.Experimental> {
                 ExperimentalPage(onBack = { backStack.removeLastOrNull() })
+            }
+            // ★ 2026-10-04 新增：分屏增强（入口在「功能」主页，紧跟「旋转增强」）。
+            //   ⚠️ 它同样**不需要**宿主状态（probed / hosted / hostState）：
+            //   这一页改的是配置，引擎在不在都不影响"改得动、存得下"
+            //   （只在功能真正触发时才需要引擎）。
+            entry<Route.SplitScreen> {
+                SplitScreenPage(
+                    onBack = { backStack.removeLastOrNull() },
+                    // ★ 2026-10-06：同上 —— 分屏那份应用名单也收进三级页。
+                    onOpen = ::go,
+                )
+            }
+            // ★ 2026-10-06 新增：三个三级页（用户原话「可以适当增加三级菜单，要让所有功能都
+            //   清晰明了」）。它们分别承接三块**内容撑不住一页**的东西：
+            //   · 两份应用名单（各一两百行）—— 原来铺在二级页里，把真正的设置推出屏外；
+            //   · 诊断的"历史"两段 —— 与实时快照不是一类。
+            //   ⚠️ 三个页面都**不需要宿主状态**（probed / hosted / hostState）：名单只读
+            //     自己的配置，运行记录只读 `hostState` —— 见各自的 entry 参数。
+            entry<Route.RotationApps> {
+                WhitelistPage(rotation = true, onBack = { backStack.removeLastOrNull() })
+            }
+            entry<Route.SplitApps> {
+                WhitelistPage(rotation = false, onBack = { backStack.removeLastOrNull() })
+            }
+            entry<Route.DiagRecords> {
+                DiagRecordsPage(
+                    onBack = { backStack.removeLastOrNull() },
+                    hostState = hostState,
+                )
             }
         }
 

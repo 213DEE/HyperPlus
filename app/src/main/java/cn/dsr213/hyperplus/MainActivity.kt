@@ -2,11 +2,12 @@ package cn.dsr213.hyperplus
 
 import android.content.Context
 import android.content.Intent
+import android.database.ContentObserver
 import android.os.Bundle
 import android.os.Handler
 import android.os.Looper
 import android.provider.Settings
-import android.widget.Toast
+import android.util.Log
 import androidx.activity.ComponentActivity
 import androidx.activity.compose.setContent
 import androidx.activity.enableEdgeToEdge
@@ -72,6 +73,40 @@ class MainActivity : ComponentActivity() {
         }
     }
 
+    /**
+     * ★★★ **「分屏数量已达上限」提示**（A4，2026-10-05 第二版）。
+     *
+     * ==================== 为什么不在分屏页里做（第一版就是这么栽的） ====================
+     * 用户原话：「折了没反应」。而**折手机的那一刻，他在分屏的两个 App 里** ——
+     * 本 App 不在前台，`SplitScreenPage` 上那个 `LaunchedEffect` 轮询**压根没跑**
+     * ⇒ 引擎明明每次都上报了（`已上报「到上限」提示（6/6）`），用户却什么都没看到。
+     *
+     * ⇒ 两条腿一起走，缺一不可：
+     *   ① **实时**：`Settings.System` 的 `ContentObserver` —— 用户**就开着本 App** 折手机时当场弹；
+     *   ② **补发**：每次 `onResume` 查一次"有没有我还没看过的" —— 覆盖最常见的情形：
+     *      用户在分屏里折完、回到本 App 就能看到那句提示。
+     *
+     * 🔴🔴 **但必须诚实记下：真正可靠的只有 ②** —— Android 10+ 起**后台应用不能弹 Toast**
+     *   （系统会静默丢弃；不崩，但什么也不会出现）。而"用户折手机"这个动作**几乎必然发生在
+     *   本 App 不在前台时**（他在分屏的两个 App 里动手）⇒ 腿 ① 在绝大多数情况下**发不出声**。
+     *   ⛔ 别因此把腿 ① 删掉：用户**正好开着本 App** 折的情况是存在的（比如刚点进来看设置时
+     *     顺手折一下），那一瞬间它有价值；成本只是一个观察者。
+     *   ⛔ **更别想着"加个前台服务就能实时弹"**：那是拿一个常驻通知换一句提示，
+     *     代价与收益完全不成比例（用户要的是"我折了没反应 ⇒ 告诉我为什么"，
+     *     而②已经能把这句话送到他手里，只是晚了几秒）。
+     *
+     * ⚠️ 已读游标**落盘**在 App prefs（[AppPrefs.splitLimitSeen] / [AppPrefs.markSplitLimitSeen]）——
+     *   放内存里的话，进程一死游标就没了（第一版正是这么写的）。
+     * ⚠️ `ContentObserver` 必须在 `onDestroy` 注销：Activity 重建（改语言）时不注销会**泄漏**。
+     * ⚠️ 回调里**不要**直接弹 Toast：`onChange` 可能在非主线程被调，且短时间内可能连来几条
+     *   ⇒ 统一 post 到 `mainHandler` 走 [showSplitLimitIfAny]（它自带已读判据，天然去重）。
+     */
+    private val limitObserver = object : ContentObserver(mainHandler) {
+        override fun onChange(selfChange: Boolean) {
+            mainHandler.post { showSplitLimitIfAny() }
+        }
+    }
+
     override fun attachBaseContext(newBase: Context) {
         // ★ 界面语言的套用点，**必须是这里**（比 `onCreate`、比任何 Compose 都早）：
         //   一旦 Activity 的 base context 建好，`stringResource` / `getString` 就已经
@@ -91,6 +126,16 @@ class MainActivity : ComponentActivity() {
         AppLocale.init(this)
         AppPrefs.init(this)
         refreshHostState()
+        // ★★ 实时那条腿：引擎写 `Settings.System` ⇒ 我们盯它（理由见 [limitObserver]）。
+        //   ⚠️ `runCatching` 必须包住：注册观察者失败（理论上不会）不该带崩整个界面启动 ——
+        //     它只是"少了一条腿"，`onResume` 的补发仍然工作。
+        runCatching {
+            contentResolver.registerContentObserver(
+                Settings.System.getUriFor(PrefsBridge.SPLIT_BUS_LIMIT),
+                false,
+                limitObserver,
+            )
+        }.onFailure { Log.w(TAG, "注册「到上限」观察者失败（已吞掉，靠 onResume 补发）", it) }
 
         setContent {
             FaceRotateTheme {
@@ -131,6 +176,24 @@ class MainActivity : ComponentActivity() {
         AppPrefs.refreshCalibFromSettings()
     }
 
+    // ================================================================ 「到上限」提示
+
+    /**
+     * 有**还没给用户看过**的「到上限」回报就弹一次提示（A4，理由见 [limitObserver]）。
+     *
+     * ★ 判据只有一条：`引擎那条记录的时刻 > 已读游标`。
+     *   ⇒ 同一个 stamp 无论被调用多少次都只会弹一次（弹完立刻推进游标并落盘）。
+     * ⚠️ 游标**落在 App prefs**、不是内存 ⇒ 进程重启后仍然记得"这条看过了"。
+     */
+    private fun showSplitLimitIfAny() {
+        val lim = runCatching { ModuleLink.readSplitLimit(this) }.getOrNull() ?: return
+        if (lim.stampMs <= AppPrefs.splitLimitSeen()) return
+        // ★ 先推进游标再弹：Toast 是**非阻塞**的，弹出去就返回；
+        //   反过来（先弹后记）在"回调连来两次"时会把同一条弹两遍。
+        AppPrefs.markSplitLimitSeen(lim.stampMs)
+        AppToast.show(this, getString(R.string.split_limit_toast))
+    }
+
     // ================================================================ 标定（2026-10-04 起：引擎全自动）
 
     // 这里原来有 `calibrate(step)` 与 `calibMessage(r)`：用户点「校准」时请引擎开相机采样，
@@ -150,6 +213,9 @@ class MainActivity : ComponentActivity() {
     override fun onResume() {
         super.onResume()
         refreshHostState()
+        // ★★ **补发那条腿**（理由见 [limitObserver]）：用户最常见的路径是
+        //   "在分屏里折 → 没反应 → 回到本 App" —— 提示就在这一刻补给他。
+        showSplitLimitIfAny()
         mainHandler.removeCallbacks(stateTick)
         mainHandler.postDelayed(stateTick, STATE_TICK_MS)
     }
@@ -162,6 +228,8 @@ class MainActivity : ComponentActivity() {
 
     override fun onDestroy() {
         mainHandler.removeCallbacks(stateTick)
+        // ★ 必须注销：改语言会 `recreate()`，漏了它每重建一次就多留一个观察者（泄漏）
+        runCatching { contentResolver.unregisterContentObserver(limitObserver) }
         io.shutdownNow()
         super.onDestroy()
     }
@@ -183,11 +251,18 @@ class MainActivity : ComponentActivity() {
         }.onFailure { toast(getString(R.string.open_settings_failed, it.javaClass.simpleName)) }
     }
 
-    private fun toast(msg: String) {
-        Toast.makeText(this as Context, msg, Toast.LENGTH_SHORT).show()
-    }
+    /**
+     * 弹一句提示 —— 统一走 [AppToast]（⛔ 别再直接写 `Toast.makeText`，理由见 [AppToast] 类注释）。
+     *
+     * ⚠️ **[AppToast] 已自带线程保障** ⇒ 这里**不用**再关心"是不是主线程"
+     *   （[limitObserver] 的 `onChange` 那条路径因此可以放心直接用）。
+     */
+    private fun toast(msg: String) = AppToast.show(this, msg)
 
     private companion object {
+        /** 日志标签（本类只在异常/关键路径打点，不做常规刷屏） */
+        const val TAG = "HyperPlusMain"
+
         /** 界面开着时的状态刷新周期（见 [stateTick]） */
         const val STATE_TICK_MS = 2_000L
     }

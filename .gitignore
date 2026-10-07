@@ -20,6 +20,18 @@ _build.log
 # ---- 一次性探针 / 临时导出（不属于产品） ----
 _probe/
 _tmp/
+# ⚠️ 仓库根的一次性补丁脚本（`_patch_*.py` / `_drop_*.py` 这类）用 `_` 前缀当记号（2026-10-06）：
+#   它们执行完就作废，但**没被任何规则盖住** ⇒ `git add .` 会把它们一起收进去。
+#   现行做法是每轮清理时移进 `_tmp/`；这条规则是兜底（⛔ 只管仓库根，不影响子目录里的正经脚本）。
+/_*.py
+
+# ---- 自带 sqlite3 的构建中间产物（2026-10-05） ----
+# ⚠️ tools/sqlite3build/ 里是**官方源码 + 交叉编译时的临时文件**（约 16MB），
+#   属于"可重新生成"的东西 ⇒ 不入库。
+#   ★ **产物本身要入库**：它已经放在 `app/src/main/jniLibs/arm64-v8a/libsqlite3bin.so`
+#     —— 那是 App 运行必需的文件（不是中间产物），⛔ 别把它也 ignore 了。
+#   ★ 重建方法见 `tools/sqlite3build/README.md`（含确切的 NDK 与编译参数）。
+tools/sqlite3build/
 
 # ---- 改动前的回滚点（本地留档，不公开） ----
 _backup_*/
@@ -28,6 +40,15 @@ _backup_*/
 # ⚠️ 只挡 md，docs/ 下的捐赠码等资产仍要入库。
 docs/*.md
 docs/logs/
+# ⚠️⚠️ 2026-10-07 补：上面那条**挡不住子目录** —— gitignore 的 `*` **不跨 `/`**，
+#   于是 `docs/_archive/` 里那 10 份内部文档（机型实测数据 / 作废路线分析 / 热索引原文 /
+#   `_bak_*.md.bak`）会被 `git add -A` **一并收进公开仓库**。
+#   ✅ 实证：`git check-ignore docs/_archive/xxx.md` 在补这条之前**无输出**（＝没被挡）。
+docs/_archive/
+# ⚠️ 2026-10-07 补：`docs/_*.py` 是**只服务上面那些不公开 md** 的内部工具
+#   （`docs/_gen_index.py` 扫描 docs/*.md 生成 INDEX.md）。
+#   不挡的话它会以「未跟踪」形态永远挂在 `git status` 里，且公开一份「内部文档的生成器」本身没意义。
+docs/_*.py
 
 # ---- 签名密钥（绝不入库） ----
 *.jks

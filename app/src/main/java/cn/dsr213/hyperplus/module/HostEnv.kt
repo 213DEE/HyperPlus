@@ -2,6 +2,7 @@ package cn.dsr213.hyperplus.module
 
 import android.content.Context
 import android.content.ContextWrapper
+import android.os.UserManager
 import android.util.Log
 import com.google.mlkit.common.sdkinternal.MlKitContext
 import dalvik.system.BaseDexClassLoader
@@ -82,6 +83,36 @@ internal object HostEnv {
     fun nativeLibDir(appCtx: Context?): File? =
         appCtx?.applicationInfo?.nativeLibraryDir?.let { File(it) }
 
+    // ================================================================ 解锁闸
+
+    /**
+     * 用户 0 解锁了没有 —— `UserManager.isUserUnlocked()`。
+     *
+     * ★★ 为什么这一格是**生死线**（2026-10-07 实证）：SystemUI 是 **direct-boot aware**
+     *   应用，它在**用户解锁之前**就已经起来了（本机实测：锁屏期间 SystemUI 每次重启，
+     *   进程只活 **9.7~14.4 秒**就崩）。而我们的引擎在启动序列里会初始化 ML Kit
+     *   （[prepare]）—— ML Kit 会在**它自己的后台线程**上读 SharedPreferences，
+     *   而那份文件在 **CE（凭据加密）存储**里，解锁前读不到：
+     *
+     *   ```
+     *   java.lang.IllegalStateException: SharedPreferences in credential encrypted storage
+     *       are not available until after user (id 0) is unlocked
+     *     at com.google.mlkit.common.sdkinternal.SharedPrefManager.getMlSdkInstanceId
+     *     at …mlkit_vision_face.zzoc.zzc        ← 抛在 ML Kit 自己的 HandlerThread 上
+     *   ```
+     *
+     *   ★ 关键：异常抛在**别的线程**上 ⇒ 外面包多少层 `runCatching` 都拦不住，
+     *     它直接把 SystemUI 带走，紧接着一次 `SYSTEM_RESTART`
+     *     （设备 dropbox 里现存 5 份同栈记录，全部 `Keyguard-Locked: true`）。
+     *   ⇒ **唯一的解法：解锁之前，一个 ML Kit 的类都不许碰。**
+     *
+     * ⚠️ 读不到就当作**已解锁**（fail-open）：宁可退回改动前的行为，
+     *   也不能因为一次读失败让引擎再也起不来。
+     */
+    fun userUnlocked(ctx: Context): Boolean = runCatching {
+        (ctx.getSystemService(Context.USER_SERVICE) as UserManager).isUserUnlocked
+    }.getOrDefault(true)
+
     // ================================================================ ① 预加载 so
 
     /**
@@ -132,10 +163,22 @@ internal object HostEnv {
      * 顺序是有讲究的，不能调换：
      *   ① 预加载 so  →  ② 初始化 MlKitContext  →  ③ 之后才允许碰 FaceDetector
      *
+     * ⚠️⚠️ **调用方必须先保证用户已解锁**（见 [userUnlocked]）—— 解锁前调用会把 SystemUI 崩掉，
+     *   而且是**别的线程**抛异常，调用方的 `runCatching` 兜不住。本方法内部另设一道闸兜底。
+     *
      * @return 逐行可读的准备报告（写日志用）
      */
     fun prepare(hostCtx: Context, appCtx: Context?, classLoader: ClassLoader?): List<String> {
         val out = mutableListOf<String>()
+
+        // ★★ 解锁闸（2026-10-07）。这里是**第二道**（第一道在 [EngineHost] 的启动路径上），
+        //   防的是别的调用方（如 [ModuleSelfCheck] 的复测通道）在锁屏时误入 ——
+        //   理由与后果见 [userUnlocked] 的长注释：解锁前碰 ML Kit = SystemUI 必崩。
+        if (!userUnlocked(hostCtx)) {
+            out += "🔒 用户尚未解锁 ⇒ 跳过宿主环境准备（解锁前读 CE 存储会把系统界面搞崩）"
+            return out
+        }
+
         out += "java.library.path=${libraryPath()}"
 
         val mlCls = runCatching { Class.forName("com.google.mlkit.vision.face.FaceDetection") }.getOrNull()

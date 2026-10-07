@@ -1,23 +1,43 @@
 package cn.dsr213.hyperplus.ui
 
+import android.content.Intent
+import androidx.compose.foundation.layout.padding
 import androidx.compose.runtime.Composable
+import androidx.compose.runtime.getValue
+import androidx.compose.runtime.mutableStateOf
+import androidx.compose.runtime.remember
+import androidx.compose.runtime.rememberCoroutineScope
+import androidx.compose.runtime.setValue
+import androidx.compose.ui.Modifier
 import androidx.compose.ui.platform.LocalContext
 import androidx.compose.ui.res.stringResource
+import androidx.compose.ui.unit.dp
 import androidx.compose.ui.unit.sp
+import androidx.core.content.FileProvider
+import cn.dsr213.hyperplus.DiagnosticsCollect
 import cn.dsr213.hyperplus.ModuleLink
 import cn.dsr213.hyperplus.R
+import java.io.File
+import kotlinx.coroutines.launch
 import top.yukonga.miuix.kmp.basic.Text
+import top.yukonga.miuix.kmp.basic.TextButton
+import top.yukonga.miuix.kmp.preference.ArrowPreference
 import top.yukonga.miuix.kmp.theme.MiuixTheme
 
 /**
  * 二级页：**诊断**（用户 2026-09-28 点名要的收纳）。
  *
- * 装的是四块"排障读数"：
+ * 装的是**实时快照**两段（★ 2026-10-06 起）：
  *   1. 触发与让位 —— 方向传感器 / 修改系统设置权限 / 设置同步 / 前置摄像头编号 /
  *      应用名单控制 / 摄像头被占用 / 服务响应
  *   2. 识别指标 —— 识别轮次与计数、本轮识别结果、方向基准校验、校准值
- *   3. 数据记录 —— 记录文件的位置说明
- *   4. 最近事件 —— 把运行状态摊成几行人话（[engineReadoutLines]）
+ *   3. 运行记录 —— **一行入口**（→ 三级页 [Route.DiagRecords]）
+ *
+ * ★ 2026-10-06：原来的第 3、4 段（「数据记录」＋「最近事件」）**搬去了三级页**
+ *   —— 它们是"历史"（记在哪、最近干了什么），与上面两段的"实时快照"
+ *   （此刻在怎么工作）不是一类东西。用户原话：「**还是很乱，可以适当增加三级菜单，
+ *   要让所有功能都清晰明了**」。
+ *   ⚠️ 搬的只是**位置**：读数口径、判断分支、阈值一个字未改（见本注释末尾那条纪律）。
  *
  * ★ 设计原则：**不新增任何数据通道**。这里用的还是同一份 [ModuleLink.State]，
  *   只是换了个地方显示 —— 所以不存在"两页看到的数据不一致"这种可能。
@@ -45,9 +65,17 @@ import top.yukonga.miuix.kmp.theme.MiuixTheme
 internal fun DiagnosticsPage(
     onBack: () -> Unit,
     hostState: ModuleLink.State?,
+    /** 打开三级页「运行记录」—— 与 [RotationPage] 同一个形状，理由见那边。 */
+    onOpen: (Route) -> Unit,
 ) {
     val hs = hostState
     val ctx = LocalContext.current
+
+    // ★ 导出是**一次性的重活**（要跑 logcat，有 root 时还要起一个 su）⇒ 用 busy 守卫挡住连点，
+    //   失败时把话说在卡里，⛔ 不弹东西、不假装成功。
+    val scope = rememberCoroutineScope()
+    var exporting by remember { mutableStateOf(false) }
+    var exportFailed by remember { mutableStateOf(false) }
 
     SubPage(title = stringResource(R.string.diag_title), onBack = onBack) {
         // ---------------------------------------------------- 触发与让步
@@ -61,9 +89,19 @@ internal fun DiagnosticsPage(
                         if (hs.sensorAvailable) R.string.diag_sensor_on else R.string.diag_sensor_off,
                     ),
                 )
+                // ⚠️ **三态**（2026-10-05 修）。原来只有「已具备 / 缺失」两支，
+                //   把「状态串里没有 `grant` 这一项」（= 引擎没在跑 / 老格式）也说成了「缺失」——
+                //   那是**误报**：用户据此去系统设置里找本应用，根本找不到
+                //   （清单刻意没声明 `WRITE_SETTINGS`）。实测 `com.android.systemui` 的
+                //   `WRITE_SETTINGS` 是 `granted=true`（`android.uid.systemui` 自带）⇒
+                //   真缺的可能性极低，「没读到」才是常见情况。与 `cfgold` 那边同一套做法。
                 kv(
                     stringResource(R.string.diag_kv_write),
-                    stringResource(if (hs.writeGranted) R.string.diag_granted else R.string.diag_missing),
+                    when {
+                        !hs.grantReported -> stringResource(R.string.diag_grant_unknown)
+                        hs.writeGranted -> stringResource(R.string.diag_granted)
+                        else -> stringResource(R.string.diag_missing)
+                    },
                 )
                 // ★ 从前这块叫「配置同步（root）」。配置通道换成 App 推广播之后
                 //   不再需要 root，显示的是**引擎有没有读到配置** —— 它才是现在唯一会出问题的地方。
@@ -229,28 +267,98 @@ internal fun DiagnosticsPage(
             }
         }
 
-        // ---------------------------------------------------- 数据记录
-        // ⚠️ 这张卡存在的唯一意义是"告诉用户**这里没有开关**"，免得他找。
-        //   2026-10-01 精简：原来还解释了文件存在谁的目录、我们为什么没有读权限 ——
-        //   那是权限模型，用户不需要 ⇒ 只留结论。
-        TextCard(title = stringResource(R.string.diag_section_log)) {
-            Note(stringResource(R.string.diag_log_note))
+        // ---------------------------------------------------- 运行记录（**一行入口**，2026-10-06 改）
+        //
+        // ★ 原来这里是两段内容（「数据记录」＋「最近事件」）**平铺**在本页 ——
+        //   它们与上面两段不是一类东西：上面是**实时快照**（此刻在怎么工作），
+        //   这两段是**历史**（记在哪、最近干了什么）。
+        //   用户 2026-10-06 放行三级菜单（原话：「还是很乱，可以适当增加三级菜单，
+        //   要让所有功能都清晰明了」）⇒ 两段搬进 [Route.DiagRecords]（[DiagRecordsPage]）。
+        //
+        // ⚠️ 搬的只是**位置**：两段里的每一行读数、每一个判断分支、每一个阈值全部原样，
+        //   ⛔ 别在搬运时"顺手润色"（那是本页的硬纪律，见类注释末尾）。
+        // ★ 固定在**整页最末**（骨架 R5 的第 ⑤ 段：延伸内容排在设置之后）。
+        SectionCard(title = stringResource(R.string.diag_records_section)) {
+            ArrowPreference(
+                title = stringResource(R.string.diag_records_title),
+                summary = stringResource(R.string.diag_records_summary),
+                onClick = { onOpen(Route.DiagRecords) },
+            )
         }
 
-        // ---------------------------------------------------- 最近事件
-        TextCard(title = stringResource(R.string.diag_section_events)) {
-            val lines = engineReadoutLines(ctx, hs)
-            if (lines.isEmpty()) {
-                Note(stringResource(R.string.diag_events_none))
-            } else {
-                lines.forEach { line ->
-                    Text(
-                        text = line,
-                        color = MiuixTheme.colorScheme.onSurface,
-                        fontSize = 13.sp,
-                    )
-                }
+        // ---------------------------------------------------- 反馈与排查（2026-10-06 新增）
+        //
+        // ★ 为什么必须有这一段：模块的失败原因**只落在 logcat 里** ——
+        //   `SplitStageLimit` 的「❶ 类未找到…⇒ 上限无法提升」、`HyperPlusModule` 的
+        //   「拿不到宿主 Application，模块无法工作」，清一色是 Log.w / Log.e；
+        //   而 README 教用户跑的 `adb logcat` —— **普通用户做不到**。
+        //   ⇒ 没有这一段，「用户说用不了」就只能靠猜。采集内容与分层理由见 `DiagnosticsCollect`。
+        //
+        // ★ 固定在整页最末：它是「最后一招」的动作；前面那些读数都是在教用户自己先看一眼。
+        // ⚠️ 必须用 [TextCard]（内边距 16dp）而不是 [SectionCard]（内边距 0）：
+        //   这张卡装的是「文字 + 一个按钮」，没有自带内边距的偏好控件 ⇒ 用 SectionCard
+        //   时按钮会**贴住卡片左右与下边缘**（2026-10-07 用户点名「没有左右边距和下边距」）。
+        //   规范第 ⑩ 条：装纯文字用 TextCard；契约见 [BTN_SLOT] 那段「边距归谁给」。
+        TextCard(title = stringResource(R.string.diag_export_section)) {
+            Text(
+                text = stringResource(R.string.diag_export_note),
+                color = MiuixTheme.colorScheme.onSurfaceVariantSummary,
+                style = MiuixTheme.textStyles.paragraph,
+                // ⚠️ 不写水平边距：外层已是 [TextCard]，16dp 由卡片统一给（原来这里是
+                //   自画 16dp，因为当时用的是零内边距的 SectionCard）。这里只留与按钮之间的间隔。
+                modifier = Modifier.padding(bottom = 4.dp),
+            )
+            if (exportFailed) {
+                Text(
+                    text = stringResource(R.string.diag_export_failed),
+                    color = MiuixTheme.colorScheme.error,
+                    style = MiuixTheme.textStyles.paragraph,
+                    modifier = Modifier.padding(bottom = 4.dp),
+                )
             }
+            TextButton(
+                text = stringResource(
+                    if (exporting) R.string.diag_export_busy else R.string.diag_export_title,
+                ),
+                onClick = {
+                    if (!exporting) {
+                        exporting = true
+                        exportFailed = false
+                        scope.launch {
+                            // ⚠️ 全程 runCatching：采集里要跑 logcat（偶尔会被 ROM 限制）、
+                            //   写文件、起分享面板 —— 任何一步失败都只该落成卡里那一行红字。
+                            val ok = runCatching {
+                                val (name, text) = DiagnosticsCollect.collect(ctx)
+                                val dir = File(ctx.cacheDir, "exports").apply { mkdirs() }
+                                val file = File(dir, name)
+                                file.writeText(text, Charsets.UTF_8)
+                                // ★ authority 用 `${applicationId}.fileprovider` 拼出来，
+                                //   与清单里那行保持同一真值源（⛔ 别在两边各写一份字面量）
+                                val uri = FileProvider.getUriForFile(
+                                    ctx,
+                                    ctx.packageName + ".fileprovider",
+                                    file,
+                                )
+                                val send = Intent(Intent.ACTION_SEND).apply {
+                                    type = "text/plain"
+                                    putExtra(Intent.EXTRA_STREAM, uri)
+                                    putExtra(Intent.EXTRA_SUBJECT, name)
+                                    addFlags(Intent.FLAG_GRANT_READ_URI_PERMISSION)
+                                }
+                                ctx.startActivity(
+                                    Intent.createChooser(
+                                        send,
+                                        ctx.getString(R.string.diag_export_picker),
+                                    ).addFlags(Intent.FLAG_ACTIVITY_NEW_TASK),
+                                )
+                            }.isSuccess
+                            exportFailed = !ok
+                            exporting = false
+                        }
+                    }
+                },
+                modifier = BTN_SLOT,
+            )
         }
     }
 }

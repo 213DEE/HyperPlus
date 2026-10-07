@@ -7,7 +7,7 @@
     `translatable="false"` ⇒ **不要在这里重复**，重复了反而会被 lint 报冲突。
 
   ⚠️ 这里的键必须与 `values/strings.xml` **一一对应**，漏一个就会在简体界面下
-    掉回英文。`_probe/check_strings_parity.py` 专查这件事。
+    掉回英文。`<工作区根>/_probe/check_strings_parity.py` 专查这件事（⚠️ 该脚本在**工作区根**，**不在本 repo 内**）。
 -->
 <resources>
     <string name="app_name">HyperPlus</string>
@@ -20,7 +20,6 @@
     <string name="lang_name_auto">跟随系统</string>
 
     <string name="lang_page_title">语言</string>
-    <string name="lang_page_summary">界面语言</string>
     <string name="lang_page_desc">选择本应用的界面语言。</string>
     <string name="lang_page_hint">改完立即生效。</string>
 
@@ -39,15 +38,50 @@
     <string name="settings_channel_default">旋转服务还没读到你的设置。</string>
     <string name="settings_channel_fix">修好之前所有开关都不生效 —— 在 LSPosed 里启用 HyperPlus，并给它的作用域勾上「系统界面」。</string>
     <string name="settings_section_monitor">监控与排查</string>
+    <string name="settings_perm_title">权限管理</string>
+    <string name="settings_perm_summary">模块 · root · 修改系统设置</string>
     <string name="settings_status_title">当前状态</string>
     <string name="settings_status_summary">运行状态 · 方向控制 · 当前方向 · 半自动按钮</string>
     <string name="settings_diag_title">诊断</string>
-    <string name="settings_diag_summary">触发与让位 · 识别指标 · 数据记录 · 最近事件</string>
+    <!-- ⚠️ 2026-10-06：本摘要**从四要素改成三要素** —— 「数据记录 · 最近事件」
+         已搬去三级页「运行记录」（诊断页现在只剩两段实时快照 ＋ 一行该入口）。
+         ⛔ 别按旧印象把它改回去。 -->
+    <string name="settings_diag_summary">触发与让位 · 识别指标 · 运行记录</string>
+    <string name="settings_restart_section">维护</string>
+    <string name="settings_restart_note">重启状态栏和导航栏，几秒后自动恢复。改了设置没生效时用。</string>
+    <string name="settings_restart_btn">重启系统界面</string>
+    <string name="settings_restart_dlg_title">重启系统界面？</string>
+    <string name="settings_restart_dlg_msg">状态栏和导航栏会消失几秒，然后自动恢复。</string>
+    <string name="settings_restart_dlg_cancel">取消</string>
+    <string name="settings_restart_dlg_confirm">重启</string>
+    <string name="settings_restart_no_root">重启失败：这台设备没有可用的 root。</string>
     <string name="settings_section_app">应用</string>
     <string name="settings_about_title">关于</string>
     <string name="settings_about_summary">版本 · 检查更新 · 运行方式 · 免责声明</string>
     <string name="settings_language_title">语言</string>
     <string name="settings_language_summary">跟随系统 · 简体中文 · 繁體中文 · English</string>
+
+    <!-- ================================================ 二级页：权限管理 -->
+    <string name="perm_title">权限管理</string>
+    <string name="perm_section_note">关于这一页</string>
+    <string name="perm_explain">下面三项都拿到了，功能才会动起来。哪一项写着「未获取」，点那一行就能去给它授权。</string>
+    <string name="perm_section_items">检查项</string>
+    <string name="perm_lsposed_title">LSPosed 模块</string>
+    <string name="perm_lsposed_ok">正在运行</string>
+    <string name="perm_lsposed_missing">没在运行 —— 点一下去 LSPosed 里启用 HyperPlus，作用域勾上「系统界面」</string>
+    <string name="perm_root_title">Root</string>
+    <string name="perm_root_ok">已授权</string>
+    <string name="perm_root_denied">没授权 —— 点一下再申请一次</string>
+    <string name="perm_root_unavailable">这台机器没有 root，点了也没用</string>
+    <string name="perm_probing">正在检查…</string>
+    <string name="perm_write_title">修改系统设置</string>
+    <string name="perm_write_ok">系统界面自带，无需你操作</string>
+    <string name="perm_write_missing">异常：服务在跑却拿不到 —— 重启「系统界面」后再看</string>
+    <string name="perm_write_unknown">未读到 —— 旋转服务没在跑，先把上面第一项修好</string>
+    <string name="perm_state_ok">已获取</string>
+    <string name="perm_state_missing">未获取</string>
+    <string name="perm_state_unknown">未读到</string>
+    <string name="perm_recheck">重新检测</string>
 
     <!-- ================================================ 二级页：关于 -->
     <string name="about_title">关于</string>
@@ -63,18 +97,66 @@
     <string name="function_title">功能</string>
     <string name="function_section_rotation">旋转</string>
     <string name="function_section_experimental">实验</string>
+    <!-- ⚠️ function_section_rotation / function_section_split 自 2026-10-04 起**不再被引用**：
+         用户点名把「旋转」「分屏」两个小标题合并成下面这一个（原话：「把主页的旋转、分屏
+         两个小标题，合并成"系统增强"小标题」）。保留键位只是让"合并"这一步可回退，
+         ⛔ 别据此以为页面上还有两个小标题。 -->
+    <string name="function_section_system">系统增强</string>
     <string name="function_rotation_title">旋转增强</string>
     <string name="function_rotation_summary">内屏：%1$s；外屏交给系统处理（模式 / 悬浮按钮 / 方向 / 应用名单）</string>
     <string name="function_state_probing">正在读取运行状态…</string>
-    <string name="function_state_noservice">读不到旋转服务</string>
-    <string name="function_state_offline">旋转服务已离线</string>
+    <string name="function_state_noservice">读不到增强服务</string>
+    <string name="function_state_offline">增强服务已离线</string>
     <string name="function_state_running">运行中</string>
-    <string name="function_state_probing_long">正在读取旋转服务的状态…</string>
+    <string name="function_state_probing_long">正在读取增强服务的状态…</string>
     <string name="function_no_report">还没有收到任何状态回报。最常见的原因是模块没在 LSPosed 里启用（那样只能保存设置，转不动屏幕）。</string>
     <string name="function_lost">最后一次响应在 %1$d 秒前（超过 %2$d 秒视为离线）；系统界面重启后会自动恢复，稍等即可。</string>
     <string name="function_mode_system">当前模式是「跟随系统」，本应用不介入</string>
     <string name="function_not_active">尚未生效</string>
     <string name="function_await_first">等待首次识别 —— 转动一下手机</string>
+    <!-- 运行状态（2026-10-04 晚）：主语是整个模块，报「启用了哪些增强」 -->
+    <!-- ⚠️ 一个都不启用时**不许给祈使句**（见 FunctionPage.enabledSummary 的注释）。 -->
+    <string name="function_running_summary">已启用：%1$s</string>
+    <string name="function_running_sep">、</string>
+    <string name="function_running_none">当前所有增强都处于关闭状态</string>
+    <!-- ================================================ 分屏增强（2026-10-04） -->
+    <!-- ⚠️ split_dir_left / split_dir_right / split_dir_section 里的字面量都是**用户给的原话**
+         （「朝左 / 朝右」「2分屏展开方向」）⇒ 逐字照搬，⛔ 不许顺手改措辞 -->
+    <string name="function_section_split">分屏</string>
+    <string name="function_split_title">分屏增强</string>
+    <string name="function_split_summary">2分屏展开方向：%1$s</string>
+    <string name="split_title">分屏增强</string>
+    <string name="split_dir_section">2分屏展开方向</string>
+    <string name="split_dir_note">轻折一下多开一格分屏时，当前应用留在哪一侧。</string>
+    <string name="split_dir_left">朝左</string>
+    <string name="split_dir_right">朝右</string>
+    <!-- 2026-10-05（A4）：用户原话「分屏数量已达上限」⇒ 逐字照抄。 -->
+    <string name="split_limit_toast">分屏数量已达上限</string>
+    <!-- 2026-10-06：「角度校准」整体下线（用户原话「不给这么多自定义功能，越多越难做」）
+         ⇒ 它那 27 条文案一并删除。唯一**改名保留**的是原 `split_calib_btn_confirm`
+         —— 高温保护那张卡的「确认」按钮还在用它（同一个动作、同一个词）。 -->
+<string name="split_thermal_btn_confirm">确认</string>
+    <!-- ================================================ 高温保护（2026-10-05） -->
+    <!-- ⚠️ split_thermal_warn 的措辞是**用户原话**（「该操作存在风险，请谨慎修改」）
+         ⇒ 逐字照抄，⛔ 不许顺手"优化"。
+         ⚠️ split_thermal_on_dlg_msg 必须把**不可逆风险**写清楚 —— 这是用户在需求里
+            点名的唯一硬要求（原话：「弹窗里面写清楚关闭过热保护可能造成不可逆的风险」），
+            ⛔ 别为了"不那么吓人"把它删成一句"确定要关闭吗"。 -->
+    <string name="split_thermal_sec_title">高温保护</string>
+    <string name="split_thermal_limit_note">温度超过这个值时，系统不再增加分屏格数。默认 47°C，是出厂设定值。</string>
+    <string name="split_thermal_limit_label">上限（°C）</string>
+    <string name="split_thermal_limit_invalid">请输入 %1$d 到 %2$d 之间的整数。</string>
+    <string name="split_thermal_limit_summary">当前 %1$d°C</string>
+    <string name="split_thermal_warn">该操作存在风险，请谨慎修改</string>
+    <string name="split_thermal_reset">恢复默认</string>
+    <string name="split_thermal_guard_title">关闭过热保护</string>
+    <string name="split_thermal_guard_summary">关闭后，上面的温度上限不再起作用</string>
+    <string name="split_thermal_on_dlg_title">确定关闭过热保护？</string>
+    <string name="split_thermal_on_dlg_msg">关闭之后，手机温度过高时系统不再阻止你增加分屏。长时间高温运行会永久损坏电池和其它硬件，这种损坏无法恢复。请确认你了解并愿意承担这个风险。</string>
+    <string name="split_thermal_off_dlg_title">确定恢复过热保护？</string>
+    <string name="split_thermal_off_dlg_msg">手机温度过高时，系统会重新阻止你增加分屏。</string>
+    <string name="split_thermal_dlg_confirm">关闭</string>
+    <string name="split_thermal_dlg_cancel">取消</string>
 
     <!-- ================================================ 实验功能（2026-10-03） -->
     <!-- ⚠️ experimental_warning 是**用户给的原话**，逐字照抄，⛔ 不许顺手改措辞 -->
@@ -82,8 +164,12 @@
     <string name="experimental_title">实验功能</string>
     <string name="experimental_warning">以下功能仍处于实验阶段，效果可能极度不稳定，请谨慎使用</string>
     <string name="experimental_adaptive_title">自适应旋转</string>
-    <string name="experimental_adaptive_summary">打开后，到「旋转增强」的「模式」里选它</string>
-    <string name="experimental_adaptive_note">关掉它只是让这一项从「模式」里消失，不会改动你当前正在用的模式。</string>
+    <string name="experimental_adaptive_summary">打开后，「模式」里才出现自适应旋转；切到自适应旋转后，才出现省电优先</string>
+    <string name="experimental_adaptive_note">关掉它只是让这两项不再出现，不会改动你当前正在用的设置；正在用的那一项仍然可见。</string>
+    <string name="experimental_multisplit_title">提高分屏上限</string>
+    <string name="experimental_multisplit_summary">打开后，折叠时最多可以同时摆 8 个应用（系统默认 6 个）</string>
+    <string name="experimental_multisplit_note">超过系统默认的 6 个属于原本不支持的范围，效果可能不稳定；改了开关要重启一次系统界面才会生效（设置页有「重启系统界面」）。</string>
+    <string name="experimental_multisplit_need_root">这个开关要靠 root 写入 —— 到「权限管理」页授权。</string>
 
     <string name="open_settings_failed">打不开系统设置：%1$s</string>
 
@@ -108,6 +194,13 @@
     <string name="mode_short_system">跟随系统</string>
     <string name="mode_short_adaptive">人脸</string>
     <string name="mode_short_semi">半自动</string>
+    <!-- ★ R2（2026-10-05）：应用名单里每一行「四选一」的档位名。
+         ⚠️ 刻意用**短名**：它们渲染在行的右侧（下拉的值文本，见 OverlaySpinnerPreference
+           的 showValue），超宽会被省略号截断。⛔ 别改成 mode_label_* 那种全名。 -->
+    <string name="app_mode_follow_global">跟随全局</string>
+    <string name="app_mode_system">跟随系统</string>
+    <string name="app_mode_adaptive">人脸</string>
+    <string name="app_mode_semi">半自动</string>
     <string name="mode_summary_system">不干预：完全跟随系统的「自动旋转」设置</string>
     <string name="mode_summary_adaptive">用前置摄像头识别你脸的方向，自动转屏</string>
     <string name="mode_summary_semi">转动手机时右下角弹出按钮，点一下才转屏；不用摄像头，最省电</string>
@@ -157,7 +250,6 @@
     <string name="takeover_unknown">还没有生效（暂时查不出原因，可到「诊断」页看详细状态）</string>
 
     <string name="stop_whitelist">在你的豁免名单里</string>
-    <string name="stop_uncontrollable">实测在这个屏幕上旋转无效</string>
     <string name="stop_other">不在本应用的控制范围内</string>
 
     <!-- ================================================ 运行阶段 -->
@@ -196,7 +288,7 @@
 
     <!-- ================================================ 方向（2026-10-04 合并：默认方向 + 校准） -->
     <string name="direction_title">方向</string>
-    <string name="direction_default_desc">展开后，内屏保持这个方向。</string>
+    <string name="direction_default_desc">每次展开时，内屏的默认方向，不影响后续旋转。</string>
     <string name="direction_root_note">需要 root 权限，首次点选会弹出授权请求。</string>
     <string name="direction_unsupported">这台设备的系统不支持方向设置。</string>
     <string name="direction_failed">未能修改，请确认已授予 root 权限。</string>
@@ -212,6 +304,11 @@
     <string name="rotation_gate_title">名单里的应用不干预（玩游戏时不抢资源）</string>
     <string name="rotation_gate_on">名单里的应用不弹按钮、不改方向；游戏和长视频默认在里面，不跟手就把它移出去</string>
     <string name="rotation_gate_off">已关闭：所有应用都正常工作（玩游戏时可能多占一点性能）</string>
+    <!-- ★ R1（2026-10-05）：自适应读不到环境时降级半自动。
+         ⚠️ 文案只讲"会发生什么 / 我该怎么办"，⛔ 别写成"连续 N 轮判定"那种实现说明。 -->
+    <string name="rotation_fallback_title">光线太暗或看不到脸时，改成点一下才转</string>
+    <string name="rotation_fallback_on">已开启：认不出你的脸时，右下角弹出按钮，点一下就能转；光线恢复后自动切回来</string>
+    <string name="rotation_fallback_off">已关闭：认不出你的脸时不会有任何反应</string>
     <string name="rotation_handoff_title">让位时恢复系统的自动旋转</string>
     <string name="rotation_handoff_on">让位时把方向交回系统，全屏看视频、看图仍能转屏</string>
     <string name="rotation_handoff_off">让位时保持当前方向（自动旋转仍是关的）</string>
@@ -221,6 +318,9 @@
     <string name="rotation_notice_title">使用提醒</string>
     <string name="rotation_notice_body">「注视感知 / 智能扫码」会占着前置摄像头，方向就会偶尔跟不上 —— 建议关掉它：设置 → 锁屏 → 注视感知。\n\n本应用不用一直开着，也不用加自启动或省电白名单 —— 划掉它、清掉后台都不影响。</string>
     <string name="rotation_notice_button">打开系统设置</string>
+    <!-- ⚠️ rotation_preview_* 三条自 2026-10-06 起**不再被引用**：用户点名去掉旋转增强页的
+         「预览旋转按钮」（保留键位只是让这一步可回退 —— `AppPrefs.requestHintTest()`
+         与引擎侧那条链仍然保留）⇒ ⛔ 别据此以为页面上还有这个按钮。 -->
     <string name="rotation_preview_title">预览旋转按钮</string>
     <string name="rotation_preview_body">按钮只在手机方向与屏幕方向不一致时出现。点它会立刻弹一次（位置和平时一样，屏幕右下角）；没反应就去「诊断」页看看。</string>
     <string name="rotation_preview_button">弹一次按钮给我看看</string>
@@ -235,6 +335,7 @@
     <string name="diag_kv_write">修改系统设置权限</string>
     <string name="diag_granted">已具备</string>
     <string name="diag_missing">缺失</string>
+    <string name="diag_grant_unknown">未知（本次状态里没有这一项）</string>
     <string name="diag_kv_cfg">设置同步</string>
     <string name="diag_cfg_not_ready_engine">未就绪 · 旋转服务读不到（%1$s）</string>
     <string name="diag_cfg_unknown">未知（本次状态里没有这一项）</string>
@@ -282,29 +383,55 @@
     <string name="diag_section_events">最近事件</string>
     <string name="diag_events_none">暂无</string>
 
+    <!-- 2026-10-06 新增（三级页改造） -->
+    <string name="diag_records_title">运行记录</string>
+    <string name="diag_records_section">历史记录</string>
+    <string name="diag_records_summary">日志存在哪、最近都发生了什么</string>
+    <string name="diag_export_section">反馈与排查</string>
+    <string name="diag_export_note">用不了、或者哪里不对，可以导出一份诊断日志发给我们 —— 里面是设备信息、模块状态和运行日志。没 root 也能导出，只是模块那半日志要 root 才带得上。</string>
+    <string name="diag_export_title">导出诊断日志</string>
+    <string name="diag_export_busy">正在收集…</string>
+    <string name="diag_export_picker">发送到哪里</string>
+    <string name="diag_export_failed">导出失败 —— 先在「权限管理」页确认模块已在运行，再试一次。</string>
+
     <!-- ================================================ 应用名单 -->
-    <string name="wl_section_note">名单说明</string>
-    <string name="wl_gate_off">⚠️ 上面的总开关是关着的 —— 这份名单此刻不生效，改动不会有反应。</string>
-    <string name="wl_explain">开启后，该应用的方向交给系统，本应用不再干涉。</string>
-    <string name="wl_on_title">已开启（%1$d）</string>
-    <string name="wl_empty">名单是空的 —— 所有应用都归本应用管；想放行谁，在下面列表里打开它。</string>
-    <string name="wl_tag_legend">「默认清单」= 出厂自带；「手动指定」= 你自己开的。</string>
+    <string name="wl_section_note">按应用设置</string>
+    <string name="wl_gate_off">⚠️ 上面的总开关是关着的 —— 选了「%1$s」的应用此刻仍归本应用管，其余档照常。</string>
+    <string name="wl_explain">每个应用都能单独选它用哪种旋转方式；没选的跟随全局那一档。</string>
+    <string name="wl_on_title">已单独设置（%1$d）</string>
+    <string name="wl_empty">还没有单独设置的 —— 都跟随全局那一档；想单独设谁，在下面列表里选。</string>
+    <string name="wl_tag_legend">「默认清单」= 出厂自带；「手动指定」= 你自己改的。</string>
     <string name="wl_section_search">搜索</string>
     <string name="wl_search_label">应用名或包名</string>
-    <string name="wl_count">已装 %1$d 个应用 · 名单内 %2$d</string>
-    <string name="wl_count_uc"> · 实测转不动 %1$d</string>
+    <string name="wl_count">已装 %1$d 个应用 · 已单独设置 %2$d</string>
     <string name="wl_count_match"> · 匹配 %1$d 个</string>
-    <string name="wl_reset">恢复默认（把关掉的默认项打开）</string>
-    <string name="wl_clear">清除实测记录（%1$d 条）</string>
-    <string name="wl_clear_note">清除后会重新开始检测，约需一两秒。</string>
+    <string name="wl_reset">恢复默认（清掉所有单独设置）</string>
     <string name="wl_section_installed">已安装应用（A-Z）</string>
+    <string name="wl_show_all">显示全部应用（%1$d）</string>
+    <string name="wl_hide_all">收起列表</string>
     <string name="wl_loading">正在读取应用列表…</string>
     <string name="wl_no_match">没有匹配「%1$s」的应用。</string>
     <string name="wl_tag_default"> · 默认清单</string>
     <string name="wl_tag_manual"> · 手动指定</string>
-    <string name="wl_tag_uc"> · 实测转不动</string>
     <string name="wl_own_note">本应用默认不在名单里，设置页也归它管（会看到旋转按钮）。想让设置页跟随系统旋转，就打开这一格。</string>
-    <string name="uc_note">实测转不动：本应用试过在%1$s上旋转，但屏幕没变化，所以不再控制它。</string>
+
+    <!-- 2026-10-06 新增（三级页改造） -->
+    <string name="wl_page_title">应用名单</string>
+    <string name="wl_entry_section">按应用设置</string>
+    <string name="wl_entry_summary">给每个应用单独挑一种旋转方式</string>
+
+    <!-- ================================================ 分屏名单 -->
+    <string name="swl_section_note">关于这份名单</string>
+    <string name="swl_explain">名单里的应用，你折一下屏幕也不会被分屏——游戏默认就在名单里。</string>
+    <string name="swl_on_title">已开启（%1$d）</string>
+    <string name="swl_empty">名单是空的——折一下屏幕，任何应用都会被分屏。想让某个应用不被分屏，就在下面的列表里打开它。</string>
+    <string name="swl_count">已装 %1$d 个应用 · 名单内 %2$d 个</string>
+    <string name="swl_reset">恢复默认（把移出的默认项加回来）</string>
+
+    <!-- 2026-10-06 新增（三级页改造） -->
+    <string name="swl_page_title">应用名单</string>
+    <string name="swl_entry_section">关于这份名单</string>
+    <string name="swl_entry_summary">折一下屏幕也不会被分屏的应用</string>
 
     <!-- ================================================ 捐赠卡 -->
     <string name="donate_title">支持 HyperPlus</string>

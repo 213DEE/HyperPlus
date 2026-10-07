@@ -1,6 +1,9 @@
 package cn.dsr213.hyperplus.module
 
+import android.content.BroadcastReceiver
 import android.content.Context
+import android.content.Intent
+import android.content.IntentFilter
 import android.os.Handler
 import android.os.HandlerThread
 import android.os.Looper
@@ -59,6 +62,18 @@ internal object EngineHost {
      */
     private const val HEARTBEAT_PERIOD_MS = 5_000L
 
+    /**
+     * 「等用户解锁」时的轮询周期（见 [scheduleBootAfterUnlock]）。
+     *
+     * ★ 为什么广播之外还要一条轮询：解锁广播是首选通道，但它依赖 `registerReceiver`
+     *   在 13/14+ 上的 flag 语义（对非系统广播强制要求 `EXPORTED`/`NOT_EXPORTED`）。
+     *   万一广播没来，引擎就**永远起不来**（自适应旋转静默失效）—— 这个代价太大，
+     *   所以再加一条最朴素的兜底：只要 `isUserUnlocked` 变真就补启动。
+     * ⚠️ 不会变成"每 3 秒醒一次"：进程没有 wakelock，屏幕关着时 `postDelayed`
+     *   的消息本来就会被推迟 ⇒ 锁屏整夜的额外开销可以忽略。
+     */
+    private const val UNLOCK_POLL_MS = 3_000L
+
     @Volatile private var engine: AdaptiveEngine? = null
     @Volatile private var starting = false
 
@@ -66,6 +81,12 @@ internal object EngineHost {
     @Volatile private var dead = false
 
     @Volatile private var bootThread: HandlerThread? = null
+
+    /**
+     * 「正在等用户解锁」的标记 —— 见 [scheduleBootAfterUnlock]。
+     * ★ 同时当**幂等闸**用：同一进程里只登记一次（广播 ＋ 轮询两条路都靠它收敛）。
+     */
+    @Volatile private var waitingUnlock = false
 
     // ---------------------------------------------------------------- 熔断相关（2026-10-03）
 
@@ -115,10 +136,27 @@ internal object EngineHost {
      *   连续失败到阈值就不再启动，只上报 `phase=halted` 并等用户点「重新启用」。
      *   闸放在**置 [starting] 之前** —— 否则熔断分支返回时 `starting` 会永远停在 true，
      *   后面那条恢复路径就再也进不来了（这个是坑，别动顺序）。
+     *
+     * ★★ 2026-10-07 起，**解锁闸在最前面**：[HostEnv.userUnlocked] 为假就整段不启动，
+     *   改挂解锁广播 ＋ 轮询兜底（[scheduleBootAfterUnlock]）。原因不是"锁屏用不上"，
+     *   而是**会崩**：解锁前初始化 ML Kit ⇒ 它的后台线程读 CE 存储抛异常 ⇒ SystemUI 死
+     *   （实证见 [HostEnv.userUnlocked]）。⚠️ 顺序：解锁闸 → 熔断闸 → 置 [starting]，
+     *   三道**都不能挪**（挪了要么漏崩、要么把熔断阈值吃满、要么恢复路径进不来）。
      */
     fun start(hostCtx: Context, appCtx: Context?, classLoader: ClassLoader?) {
         if (starting || engine != null || dead) {
             Log.i(TAG, "引擎已启动 / 正在启动 / 已停用，跳过（starting=$starting engine=${engine != null} dead=$dead）")
+            return
+        }
+
+        // ★★★ 2026-10-07：**解锁闸**。必须排在熔断闸**之前**——
+        //   「我们主动没启动」和「启动失败」是两件事，前者**不该**计入 `BOOT_ATTEMPTS`
+        //   （否则锁屏过夜会把熔断阈值吃满，等用户解锁时反而被熔断挡住）。
+        //   为什么解锁前绝不能碰 ML Kit：见 [HostEnv.userUnlocked] 的长注释（有完整崩溃栈）。
+        if (!HostEnv.userUnlocked(hostCtx)) {
+            Log.i(TAG, "🔒 用户尚未解锁 ⇒ 本次不启动引擎（解锁前初始化 ML Kit 会崩掉系统界面），改为解锁后自动补启动")
+            BootReport.note("🔒 用户尚未解锁 ⇒ 引擎推迟到解锁后启动")
+            scheduleBootAfterUnlock(hostCtx, appCtx, classLoader)
             return
         }
 
@@ -153,6 +191,55 @@ internal object EngineHost {
                     panic(hostCtx, "启动异常", it)
                 }
         }
+    }
+
+    // ---------------------------------------------------------------- 解锁后补启动（2026-10-07）
+
+    /**
+     * 锁屏时的出路：登记「解锁广播」＋ 一条「轮询兜底」，**解锁后自动把 [start] 再喊一次**。
+     *
+     * ★ 为什么参数要存着：真正的补启动可能发生在几十分钟之后（用户才解锁），
+     *   到那时入口参数只剩这一份引用。⛔ 不额外持有任何资源 —— 宿主进程本身就是常驻的。
+     * ★ 两条通道都在置回 [waitingUnlock] **之后**才调 [start]，且 [start] 自己开头就有
+     *   `starting || engine != null` 闸 ⇒ 广播与轮询即使同时到，也只会真启动一次。
+     */
+    private fun scheduleBootAfterUnlock(hostCtx: Context, appCtx: Context?, classLoader: ClassLoader?) {
+        if (waitingUnlock) {
+            Log.i(TAG, "🔒 已经在等解锁了，跳过重复登记")
+            return
+        }
+        waitingUnlock = true
+
+        // ① 首选：解锁广播（解锁那一刻就到）
+        runCatching {
+            hostCtx.registerReceiver(
+                object : BroadcastReceiver() {
+                    override fun onReceive(c: Context?, i: Intent?) {
+                        Log.i(TAG, "🔓 收到 ACTION_USER_UNLOCKED ⇒ 补启动引擎")
+                        waitingUnlock = false
+                        start(hostCtx, appCtx, classLoader)
+                    }
+                },
+                IntentFilter(Intent.ACTION_USER_UNLOCKED),
+            )
+            Log.i(TAG, "已登记解锁广播（解锁后自动补启动引擎）")
+        }.onFailure { Log.w(TAG, "登记解锁广播失败 ⇒ 只剩轮询兜底", it) }
+
+        // ② 兜底：轮询（不能把「引擎还能不能起来」押在广播的 flag 语义上）
+        val h = Handler(Looper.getMainLooper())
+        val tick = object : Runnable {
+            override fun run() {
+                if (!waitingUnlock) return
+                if (!HostEnv.userUnlocked(hostCtx)) {
+                    h.postDelayed(this, UNLOCK_POLL_MS)
+                    return
+                }
+                Log.i(TAG, "🔓 轮询发现已解锁 ⇒ 补启动引擎")
+                waitingUnlock = false
+                start(hostCtx, appCtx, classLoader)
+            }
+        }
+        h.postDelayed(tick, UNLOCK_POLL_MS)
     }
 
     private fun bootOn(hostCtx: Context, appCtx: Context?, classLoader: ClassLoader?) {
@@ -615,7 +702,7 @@ internal object EngineHost {
         //   `swdp=425` 而人确实在用内屏 = **测量本身**错（读到了另一块屏）。
         //   只看 `fgform` 是分不出后两种的。
         append("|swdp=").append(s.formProbeDp)
-        // 停手是哪条豁免造成的（WHITELIST / UNCONTROLLABLE；空 = 没停手）
+        // 停手是哪条豁免造成的（现在只有 WHITELIST；空 = 没停手）
         append("|fgstop=").append(s.foregroundStop)
         append("|fgr=").append(if (s.foregroundReadable) 1 else 0)
         append("|gate=").append(s.skipGateCount)
@@ -623,9 +710,6 @@ internal object EngineHost {
         // 前台门控**总开关**（2026-09-28 新增，只追加）：用户报"该转不转"时的逃生阀。
         // ⚠️ 字段名与上面的 `gate`（跳过次数）刻意区分成 `gateon`，别混。
         append("|gateon=").append(if (s.gateEnabled) 1 else 0)
-        // A 方案（2026-09-29）：不可控名单条数。它 > 0 就说明"有应用被实测判定转不动"，
-        // 与 `fgstop=UNCONTROLLABLE` 配套看 —— 前者是"记了多少条"，后者是"此刻命中了没有"。
-        append("|uc=").append(s.uncontrollableCount)
         // —— 半自动模式（2026-09-28）：semi=弹出次数 / semitgt=目标方向 / semitap=点击生效次数
         //    ovl=悬浮窗是否可用（false ⇒ 半自动根本弹不出按钮，界面必须如实提示）——
         append("|semi=").append(s.semiShownCount)

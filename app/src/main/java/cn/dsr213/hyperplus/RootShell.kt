@@ -79,7 +79,103 @@ internal object RootShell {
         runShell("settings get system $key")?.trim()?.toIntOrNull()
     }
 
+    /**
+     * ★★ **写一个 `persist.*` 属性，并读回校验**（2026-10-06 新增）。
+     *
+     * ============================ 它为什么必须存在 ============================
+     * 「提高分屏上限」那个开关的值**必须让 SystemUI 在进程起来的第一个毫秒读到** ——
+     * 实测截止线是 Δ404 ms，而走 `Settings.System` 要 Δ4.6 s 才拿得到
+     * （日志表在 [PrefsBridge.PROP_MULTISPLIT] 的 KDoc 里）。
+     * 属性活在**进程内 mmap 的属性区**，不经过 Binder ⇒ 正好满足这个时限。
+     *
+     * ⚠️ 它与 [putSystemInt] 是**两条完全不同的通道**，⛔ 谁也替代不了谁：
+     *   · `Settings.System`：ContentProvider，普通应用**读**免权限、**写**要特权 uid；
+     *   · 属性：property_service，**只有 root / init 能设** ⇒ 本方法必然起一个 su。
+     *   ⇒ 因此它同样受类注释那条纪律约束：**只为用户点击服务**，⛔ 别放进轮询。
+     *
+     * ★ 写与读回**合成一条命令**，理由与 [putSystemInt] 逐字相同：只起一个 su、
+     *   且保证「读回来的就是刚写完的状态」（中间不给别的写入者留插队的窗口）。
+     * ⚠️ 属性要走 `setprop` / `getprop`，⛔ 别照抄 [putSystemInt] 的 `settings put`。
+     *
+     * ⚠️ 失败形态也照抄 [putSystemInt]：`runShell` 把 stderr 并进了 stdout，
+     *   所以命令失败时输出里可能是 `setprop: ...` 之类的报错 ⇒ 只认**最后一个非空行**，
+     *   对不上目标值就算失败（被 SELinux 拦下时正是这个形态）。
+     *
+     * @param key   完整属性名（本工程只用常量，见 [PrefsBridge.PROP_MULTISPLIT]）
+     * @param value 属性值。本工程只写 `0` / `1` —— 都不含空格，
+     *   所以这里**不加引号、不做转义**（这也是它不能当通用接口用的原因之一）。
+     * @return 仅当命令成功**且**读回值恰好等于目标值时返回 true。
+     */
+    suspend fun putProp(key: String, value: String): Boolean = withContext(Dispatchers.IO) {
+        val script = "setprop $key $value; getprop $key"
+        val text = runShell(script) ?: return@withContext false
+        text.lineSequence()
+            .map { it.trim() }
+            .lastOrNull { it.isNotEmpty() } == value
+    }
+
+    /**
+     * ★★ **跑一条任意 root 命令，返回原样输出**（2026-10-04 新增）。
+     *
+     * ============================ 它为什么必须存在 ============================
+     * 有些动作是**文件级**的（`getprop` 读属性、`killall` 重启某个进程、`cp`/`tar` 搬运文件），
+     * 这些都不是 `Settings.System` 的读写 —— [putSystemInt] / [getSystemInt] 那两个
+     * 是"设置专用"的窄接口，做不了这些事。
+     *
+     * ⚠️ **别拿它当通用提权执行器用**：本工程对 root 的定位是
+     *   「**为用户点击服务的一次性动作**」（见类注释的纪律）—— 每次调用都会起一个 `su` 进程。
+     *   ⇒ ⛔ 不要在定时巡检、循环、每秒轮询里调它。
+     *
+     * @param script 要执行的 shell 片段（可以是 `a && b` 这种复合命令）
+     * @return null = **这台机器上根本没能用的 su**（"能力缺失"，与"命令失败"不同）；
+     *         非 null = 命令的输出（stdout 与 stderr 已合并，顺序即发生顺序）
+     */
+    suspend fun runRaw(script: String): String? = withContext(Dispatchers.IO) {
+        runShell(script)
+    }
+
     private data class ShellResult(val code: Int, val out: String)
+
+    // ================================================================ root 可用性探测（2026-10-05）
+
+    /**
+     * root 探测的**三态**结果（见 [probe]）。
+     *
+     * ⚠️ 刻意不用 `Boolean`：对用户来说这三条路的**下一步完全不同** ——
+     *   「去授权」/「等一会儿再点一次」/「这台机器根本没 root，死心吧」。
+     *   压成一个 false 只会让用户反复点、反复失败。
+     */
+    enum class RootStatus {
+        /** su 可用，而且真的给了 root（`id` 报 `uid=0`） */
+        GRANTED,
+
+        /** 有 su，但没给到 root —— 授权框被拒、或者框还挂着没人点（[TIMEOUT_MS] 超时） */
+        DENIED,
+
+        /** 这台机器上**根本没有可用的 su** —— 用户做什么都没用，只能如实告诉他 */
+        UNAVAILABLE,
+    }
+
+    /**
+     * 探一次 root 到底能不能用（权限管理页用）。
+     *
+     * 判据只有一条：跑最小命令 `id`，输出里**必须**有 `uid=0`。
+     *   - `runShell` 返回 null ⇒ [RootStatus.UNAVAILABLE]（连 su 二进制都找不到）；
+     *   - 有输出但不含 `uid=0` ⇒ [RootStatus.DENIED]。
+     *
+     * ============================ 三条纪律 ============================
+     * ① **它有副作用，而且是好的那种**：root 从没授权过时，这一次调用会**弹出授权框**。
+     *    用户要的恰恰是这个（"没获取就给我一个入口去获取"）—— 所以页面里把它说明白，
+     *    ⛔ 别偷偷调。
+     * ② ⛔ **不要放进定时巡检 / 每次重组**：每调一次就起一个 `su` 进程（见类注释的纪律）。
+     *    权限页里的调用点是"进页面一次 + 用户点一次「重新检测」"。
+     * ③ 别把这个方法当成"root 一定好用"的证明 —— 它只证明**这一刻 `id` 能跑通**。
+     *    真正的写入仍然要靠 [putSystemInt] 自己的读回校验兜底。
+     */
+    suspend fun probe(): RootStatus = withContext(Dispatchers.IO) {
+        val out = runShell("id") ?: return@withContext RootStatus.UNAVAILABLE
+        if (out.contains("uid=0")) RootStatus.GRANTED else RootStatus.DENIED
+    }
 
     /**
      * 依次尝试几个 `su` 路径，第一个**跑得动**的为准。
@@ -94,13 +190,55 @@ internal object RootShell {
      */
     private fun runShell(script: String): String? {
         for (su in SU_CANDIDATES) {
-            val r = runCatching { exec(arrayOf(su, "-c", script)) }.getOrNull() ?: continue
+            val r = runCatching { exec(suArgs(su, script)) }.getOrNull() ?: continue
             Log.i(TAG, "root 执行（$su）：exit=${r.code}｜${r.out.take(200)}")
+            // ★★ 兜底：个别 su 不认 `-M`（会吐 usage 并 exit != 0）⇒ 退到不带 `-M` 再试一次。
+            //   ⚠️ 判据是**输出里有没有 usage 字样**，而不是 exit code —— 因为
+            //     "命令真的失败"和"参数被拒"都会非 0，不能靠 exit code 区分。
+            if (r.code != 0 && r.out.contains("Usage:", ignoreCase = true)) {
+                Log.w(TAG, "$su 不认 -M，退回不带 -M 重试")
+                val r2 = runCatching { exec(arrayOf(su, "-c", script)) }.getOrNull() ?: continue
+                Log.i(TAG, "root 执行（$su，无 -M）：exit=${r2.code}｜${r2.out.take(200)}")
+                return r2.out
+            }
             return r.out
         }
         Log.w(TAG, "root 不可用（试过 ${SU_CANDIDATES.joinToString()}）")
         return null
     }
+
+    /**
+     * ★★★ **`su` 的完整参数 —— `-M` 这条是必须的**（2026-10-05 实证）。
+     *
+     * ============================ 没有 `-M` 会怎样 ============================
+     * 用户报障的「备份拿不到桌面数据」的真因**就是这条**（不是权限、不是 sqlite3）：
+     *
+     * ⚠️ 那次报障来自**已下线**的「桌面增强」（2026-10-05），但**这条机制对任何 root
+     *   文件操作都成立** ⇒ ⛔ 别因为功能没了就把 `-M` 删掉。
+     *
+     * ```
+     * # App 的 su（不带 -M）：
+     * /system/bin/sh: cd: /data/user_de/0/com.miui.home/databases: No such file or directory
+     *
+     * # adb shell 里同样的命令（adb 的 su 恰好在 global ns）：
+     * CD-OK
+     * ```
+     *
+     * **根因**：App 进程活在**它自己的 mount namespace** 里
+     * （实测：App `mnt:[4026537423]` vs adb shell `mnt:[4026535570]`），
+     * 而 `/data/user_de/0/com.miui.home/` 这个挂载点**在那个 ns 里不可见**
+     * ⇒ 报错伪装成「No such file or directory」（**不是 permission denied**，
+     * 这正是它难查的原因）。
+     *
+     * ★ 用 `nsenter --mount=/proc/<app pid>/ns/mnt` 可以 1:1 复现该报错 ⇒ 根因确认。
+     *
+     * **修法**：KernelSU / Magisk 的 `su` 都支持 `-M` / `--mount-master`
+     * ⇒ **强制在 global mount namespace 里跑**，那里能看到全部挂载点。
+     *
+     * ⚠️ **只对 `-c` 那种单命令用**：`-M` 是所有 su 实现里都有的通用选项
+     *   （KernelSU 的 `--help` 里明确列着），但个别老版本可能不认 ⇒ [runShell] 有兜底重试。
+     */
+    private fun suArgs(su: String, script: String): Array<String> = arrayOf(su, "-M", "-c", script)
 
     /**
      * 跑一条命令并等它结束。

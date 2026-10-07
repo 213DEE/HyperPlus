@@ -25,10 +25,15 @@ import java.io.File
  *   「此模块使用了已废弃且即将移除的功能」—— 那条横幅由**清单声明 + 磁盘上存在其他人可读的
  *   xml** 共同决定，改代码消不掉，只有换 API 才能摘掉。
  *
- * ⚠️⚠️ **本模块一个方法 hook 都没打** —— 别把这当成"迁移没做完"：
- *   我们注入 SystemUI 的唯一目的是**在那个进程里跑引擎**（借用它的进程身份与权限），
- *   不是去改它的行为。因此本次迁移**不涉及** Hooker / Chain / HookBuilder / Invoker 那一整套，
- *   只涉及"入口怎么写、配置从哪读"。真要用 hook 时的写法见 `docs/API102迁移_2026-10-03.md`。
+ * ⚠️⚠️ **本模块的方法 hook 只有两个，都是可选的、默认不装的**：
+ *   [SplitProbe]（2026-10-04，为"分屏增强"调查"系统原生新增分屏走哪条链"而加，**默认关**）、
+ *   [SplitTrigger]（2026-10-04，功能 1 本体 —— 捕获 WMShell 控制器实例，
+ *   三档开关与理由见它自己的类注释；★ 它的**折角传感器与校准通道不受开关限制**）。
+ *   别把"只有一个 hook"当成"迁移没做完"：我们注入 SystemUI 的主要目的是
+ *   **在那个进程里跑引擎**（借用它的进程身份与权限），不是去改它的行为。
+ *   因此本次迁移**不涉及** Hooker / Chain / HookBuilder / Invoker 那一整套，
+ *   只涉及"入口怎么写、配置从哪读"；真要用 hook 时的写法见 `docs/API102迁移_2026-10-03.md`，
+ *   现成的调用样例就在 [SplitProbe.install] 里。
  *
  * ⚠️ 硬边界（官方原话）：`targetApiVersion >= 102` 的模块在 **classloader 层面被禁止访问 legacy 包**
  *   ⇒ `XposedHelpers` / `XSharedPreferences` / `XposedBridge.log` 一律不可用。
@@ -72,12 +77,13 @@ class HyperPlusModule : XposedModule() {
     override fun onModuleLoaded(param: XposedModuleInterface.ModuleLoadedParam) {
         processName = param.processName
         runCatching {
-            Log.i(
-                TAG,
+            val loaded =
                 "模块已加载：框架=${frameworkName} ${frameworkVersion}(code=$frameworkVersionCode, " +
                     "api=$apiVersion) 进程=${param.processName} " +
-                    "systemServer=${param.isSystemServer} myPid=${Process.myPid()} myUid=${Process.myUid()}",
-            )
+                    "systemServer=${param.isSystemServer} myPid=${Process.myPid()} myUid=${Process.myUid()}"
+            Log.i(TAG, loaded)
+            // ★ 同时落盘：logcat 缓冲只保 ~10 分钟，而这条是「模块到底有没有起来」的关键证据
+            BootReport.note(loaded)
         }
     }
 
@@ -92,15 +98,27 @@ class HyperPlusModule : XposedModule() {
         if (param.packageName != TARGET_PKG) return
 
         runCatching {
-            Log.i(
-                TAG,
+            val injected =
                 "★★★ HyperPlus 模块注入成功 package=${param.packageName} " +
                     "process=$processName first=${param.isFirstPackage} " +
-                    "myPid=${Process.myPid()} myUid=${Process.myUid()}",
-            )
+                    "myPid=${Process.myPid()} myUid=${Process.myUid()}"
+            Log.i(TAG, injected)
+            BootReport.note(injected)
         }
 
         val loader = param.classLoader
+
+        // ★★★ 2026-10-06：多分屏上限提升 —— **必须在这里同步装，⛔ 不能挪进下面延迟 4 秒的 boot()**。
+        //   理由：它要赶在 `MultipleSplitOrganizer.<clinit>` **之前**挂上钩（`MAX_STAGES` 是
+        //   `<clinit>` 里算出来的静态字段），而 WM Shell 的初始化远早于 4 秒。
+        //   ⚠️ 这条路径上只做两次 `Class.forName(..., false, ...)` + 几次 hook，无 I/O，
+        //      不会拖慢 SystemUI 启动（见 [SplitStageLimit] 的时序说明）。
+        runCatching { SplitStageLimit.install(this, loader) }
+            .onFailure {
+                Log.e(TAG, "装多分屏上限提升失败（已吞掉，不影响 SystemUI）", it)
+                BootReport.note("装多分屏上限提升失败：${it.javaClass.simpleName}: ${it.message}")
+            }
+
         Handler(Looper.getMainLooper()).postDelayed({
             runCatching { boot(loader) }
                 .onFailure { Log.e(TAG, "模块初始化失败（已吞掉，不影响 SystemUI）", it) }
@@ -132,6 +150,9 @@ class HyperPlusModule : XposedModule() {
             return
         }
 
+        // ★ 拿到宿主 Context ⇒ 立刻把「启动摘要」落盘（含早于此处攒下的注入 / 钩子记录）
+        BootReport.reset(hostCtx)
+
         // ② 本 App 的 Context —— 用来定位我们自己的资源与 native 库。
         //    走 HostEnv：它会把上下文包一层，修掉 createPackageContext() 的
         //    getApplicationContext() == null（ML Kit 会在这里 NPE，实测踩过）
@@ -160,6 +181,25 @@ class HyperPlusModule : XposedModule() {
         // ⑤ ★ 引擎搬进 SystemUI —— 本模块的主线任务
         runCatching { EngineHost.start(hostCtx, appCtx, classLoader) }
             .onFailure { Log.e(TAG, "EngineHost 启动失败（已吞掉）", it) }
+
+        // ⑥ ★ 分屏观察钩子（2026-10-04 新增，**默认关闭**的调查工具）。
+        //   ⚠️ 位置：**在引擎之后**。引擎是主线，探针是临时工具 —— 两者的顺序表达优先级，
+        //     而且探针若因某种原因卡住，也不该挡住引擎启动（它是后台线程上的同步调用）。
+        //   ⚠️ 它**默认什么都不做**：先读 `Settings.Global` 的开关，关着就只打一行日志返回，
+        //     一个 hook 都不装。理由见 [SplitProbe] 类注释（常驻 hook 156 个方法是拿稳定性换便利）。
+        runCatching { SplitProbe.install(this, hostCtx, classLoader) }
+            .onFailure { Log.e(TAG, "分屏探针安装失败（已吞掉）", it) }
+
+        // ⑦ ★ 分屏触发器（2026-10-04 新增，功能 1：**轻折一下 → 分屏 +1**，**默认关闭**）。
+        //   ⚠️ 它先读三档开关（`Settings.Global` 的 [SplitTrigger.KEY]）：
+        //     0 = 关 / 1 = 只观察（只打日志，绝不进分屏）/ 2 = 真动作。
+        //   ★★ **0 档不再"什么都不装"**（2026-10-04 晚改）：折角传感器与「角度校准」
+        //     那条通道**照常装**——不然用户得先想办法把功能打开，才能校准它的阈值。
+        //     真正有风险的 hook 仍然只在 1 / 2 档挂。理由见 [SplitTrigger] 类注释。
+        //   ⚠️ 放在探针**之后**：探针是调查工具，它才是产品功能；两者互不依赖，
+        //     顺序只决定读日志时谁先出现。
+        runCatching { SplitTrigger.install(this, hostCtx, classLoader) }
+            .onFailure { Log.e(TAG, "分屏触发器安装失败（已吞掉）", it) }
     }
 
     /**

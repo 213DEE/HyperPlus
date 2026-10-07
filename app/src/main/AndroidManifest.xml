@@ -140,9 +140,18 @@
          落地方式 = 自适应图标（mipmap-anydpi-v26，minSdk 30 恒命中）
            + 各密度传统 PNG（给只认位图的系统界面用，同时也是小米要的"包内大图"）
          ⚠️ 别把它和下面 QS Tile 的 @drawable/ic_rotate_adaptive 搞混：那个是 24dp 单色
-           图标，磁贴会自行 tint，**不是**桌面图标。 -->
+           图标，磁贴会自行 tint，**不是**桌面图标。
+
+         ★ 2026-10-07 追加 android:enableOnBackInvokedCallback="true"（下面 <application> 上）：
+           治的是每次开窗都刷一遍的那条系统警告
+             W WindowOnBackDispatcher: OnBackInvokedCallback is not enabled for the application
+           （targetSdk ≥ 33 起系统会打）。本 App **不注册任何返回回调**（无 BackHandler /
+           OnBackPressedCallback）⇒ 打开这条标志后行为与之前一字不差（没回调时系统仍走
+           Activity 默认返回），只是不再刷警告。
+           ⛔ 若哪天返回观感变怪（返回动画 / 返回层级不对），**删掉这一个属性**即回原状。 -->
     <application
         android:allowBackup="false"
+        android:enableOnBackInvokedCallback="true"
         android:icon="@mipmap/ic_launcher"
         android:label="@string/app_name"
         android:roundIcon="@mipmap/ic_launcher_round"
@@ -231,6 +240,32 @@
                 <action android:name="cn.dsr213.hyperplus.action.CONFIG_REQUEST" />
             </intent-filter>
         </receiver>
+
+        <!--
+          「导出诊断日志」分享文件用的 FileProvider（2026-10-06）。
+
+          为什么必须有它：把文件交给别的应用（微信 / 邮件 / 文件管理器）时，Android 7 起
+          禁止直接传 `file://` URI（抛 FileUriExposedException），必须换成 content:// 加
+          临时读权限 —— 那就是 FileProvider 的职责。
+
+          ⚠️ authority 写成 `${applicationId}.fileprovider`（**不是**写死的包名）：
+            代码那边也是用 `packageName + ".fileprovider"` 拼的，两边必须跟着同一个
+            applicationId 走 —— 写死的话，将来 build type 加个后缀就会在运行期抛
+            「Failed to find configured root」这种只在特定变体上出现的错。
+
+          ⚠️ `exported="false"` + `grantUriPermissions="true"` 是标准组合：
+            不导出（别人不能直接访问本 provider），只靠一次性的 URI 授权对外开口子。
+            暴露的目录只有 `cacheDir/exports/` 一个（见 res/xml/file_paths.xml）。
+        -->
+        <provider
+            android:name="androidx.core.content.FileProvider"
+            android:authorities="${applicationId}.fileprovider"
+            android:exported="false"
+            android:grantUriPermissions="true">
+            <meta-data
+                android:name="android.support.FILE_PROVIDER_PATHS"
+                android:resource="@xml/file_paths" />
+        </provider>
 
     </application>
 

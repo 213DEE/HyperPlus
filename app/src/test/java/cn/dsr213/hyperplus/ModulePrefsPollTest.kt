@@ -22,6 +22,9 @@ import org.junit.Test
  *   07:42:05.475 W HyperPlusModulePrefs: 配置文件已消失或变空 → 保留上一次的配置，不广播
  *   07:42:11.479 I HyperPlusModulePrefs: 兜底轮询发现配置内容变化
  *                                        （新增:uncontrollable_clear,capture_strategy,…,rotate_mode_inner）→ …
+ *   ⚠️ 上面这行引文**原样保留**：它是当时真机日志的原话，改了就不是证据了。
+ *      （`uncontrollable_clear` 这个键 2026-10-05 已随「实测不可控」功能一起删除，
+ *       与这段历史无关 —— 别因为 grep 到它就以为还有代码在用。）
  *   ```
  *
  *   第二行的"新增"里**18 个键全在里面**，可我实际只加了一个键 —— 因为第一行那次空读

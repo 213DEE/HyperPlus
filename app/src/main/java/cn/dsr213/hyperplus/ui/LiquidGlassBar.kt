@@ -1,6 +1,11 @@
 package cn.dsr213.hyperplus.ui
 
+import android.content.Context
+import android.hardware.display.DisplayManager
 import android.os.Build
+import android.util.DisplayMetrics
+import android.util.Log
+import android.view.Display
 import androidx.compose.animation.core.animateFloatAsState
 import androidx.compose.foundation.background
 import androidx.compose.foundation.interaction.MutableInteractionSource
@@ -20,6 +25,7 @@ import androidx.compose.foundation.layout.navigationBars
 import androidx.compose.foundation.selection.selectable
 import androidx.compose.foundation.shape.RoundedCornerShape
 import androidx.compose.runtime.Composable
+import androidx.compose.runtime.LaunchedEffect
 import androidx.compose.runtime.State
 import androidx.compose.runtime.derivedStateOf
 import androidx.compose.runtime.getValue
@@ -30,12 +36,18 @@ import androidx.compose.ui.draw.shadow
 import androidx.compose.ui.graphics.Color
 import androidx.compose.ui.graphics.Shape
 import androidx.compose.ui.graphics.graphicsLayer
+import androidx.compose.ui.platform.LocalConfiguration
+import androidx.compose.ui.platform.LocalContext
+import androidx.compose.ui.platform.LocalDensity
 import androidx.compose.ui.semantics.Role
 import androidx.compose.ui.res.stringResource
 import androidx.compose.ui.text.font.FontWeight
+import androidx.compose.ui.unit.Dp
 import androidx.compose.ui.unit.dp
 import androidx.compose.ui.unit.sp
+import cn.dsr213.hyperplus.DisplaySize
 import cn.dsr213.hyperplus.R
+import cn.dsr213.hyperplus.ScreenForm
 import top.yukonga.miuix.kmp.basic.Icon
 import top.yukonga.miuix.kmp.basic.Text
 import top.yukonga.miuix.kmp.blur.LayerBackdrop
@@ -97,6 +109,36 @@ import kotlin.math.sin
  *   ⚠️ 所以这个判断**不能**交给库去兜：兜底语义是"效果没了"，而我们要的是"外观退化成实心，
  *     但导航照常可用"。这两件事的后果差着一个数量级（一个是丑，一个是不能用）。
  *   本机是 API 37，实际走的是玻璃路径。
+ *
+ * ============================ 尺寸：宽度 = 外屏宽度 − 两侧留白（2026-10-06）============================
+ * 用户原话：「悬浮底栏太靠下了，适当往上调节一下；宽度太窄了，应该拉宽到**外屏的屏幕宽度**，
+ * 外屏时的**下边距和左右边距相等**；展开到内屏后，**依然按照外屏的宽度限制**悬浮底栏」。
+ *
+ * ⇒ 三条规则，全部落在本文件：
+ *   ① **宽度** = 上限 − [BAR_MARGIN] × 2（居中），其中上限按**当前站在哪块屏**分流：
+ *      · **外屏**上 ⇒ 上限 = **这块屏自己的宽度**（外屏横过来时它也变宽，三边留白仍相等）；
+ *      · **内屏**上 ⇒ 上限 = **外屏宽度**（用户原话「展开到内屏后，依然按照外屏的宽度限制」），
+ *        再取一次 `min(窗口宽, …)` 兜住"窗口比外屏还窄"。
+ *      ⚠️ 分流判据走 [ScreenForm.probe]（**全工程唯一形态判据**，判的是**最小边**、
+ *      旋转不变）—— ⛔ 别用"窗口宽 < 512dp"自己判：外屏横过来是 685dp，会判错。
+ *   ② **下边距 = 左右边距 = [BAR_MARGIN]**；
+ *   ③ 「外屏宽」是**运行时量出来的**，⛔ 不是常量 —— 见 [outerScreenWidthDp] 里那段。
+ *
+ * ★★ 为什么第 ③ 条必须运行时量（这是本次最容易踩的坑）：
+ *   项目文档里一直写着「内屏 608dp / 外屏 425dp」，那是 **440dpi** 时期的值。
+ *   而本机 `wm density` 的 **Override density 被改成了 400dpi（2.5x）** ⇒ 真实是
+ *   **外屏 1168px ÷ 2.5 = 467dp、内屏 1672px ÷ 2.5 = 669dp**。
+ *   照文档写死 425 ⇒ 底栏会比屏幕窄 42dp（两侧各多出 21dp 的空档），
+ *   而这正是用户抱怨的"太窄"。⇒ 宽度只能**按当前密度现算**。
+ *
+ * ★★ 为什么"外屏宽"能在**展开态**量到：两块内建屏**任何时刻都在
+ *   `DisplayManager.getDisplays()` 里**（登录态与否无关）—— 本轮 `dumpsys display` 实证：
+ *   `displayId=1` 1168×1712 在内屏点亮时依然列着（`state OFF` 但元数据完好）。
+ *   所以取它的 `mode.physicalWidth/Height` 的**较小边**（物理尺寸，旋转不变）即可。
+ *   ⚠️ 认不出来时**退回当前窗口宽**（底栏仍占满它）—— 宁可"只是宽了"，也不要消失。
+ *
+ * ★ 「内屏也用外屏的宽度」是**用户明确的要求**，不是偷懒：底栏是同一块 UI，
+ *   换屏时宽度不变，用户的位置记忆才成立（否则展开一下"两个按钮"就跑到屏幕两头）。
  */
 @Composable
 internal fun LiquidGlassBar(
@@ -120,23 +162,70 @@ internal fun LiquidGlassBar(
     // 重力跟随的镜面高光（光源随手机倾斜方向游走）
     val specular = rememberGravityHighlight(BAR_SPECULAR, extraDegrees = -45f)
 
+    // ------------------------------------------------------------ 宽度
+    //
+    // ★ 用户两句话的**直译**（算式见文件头「尺寸」那段）：
+    //   · 站在**外屏**上 ⇒ 上限 = **这块屏自己的宽度**（外屏横过来时它也变宽，
+    //     三边留白仍然相等 —— 用户第 ③ 条要的就是这个）；
+    //   · 站在**内屏**上 ⇒ 上限 = **外屏宽度**（原话「展开到内屏后，依然按照外屏的宽度限制」）。
+    // ⚠️ 内屏那一支再取一次 `min(窗口, 外屏)`，兜住"窗口比外屏还窄"（万一跑在更小的窗口里）：
+    //   那种情况下底栏**不会溢出**（`Modifier.width()` 被父约束夹住时会出现
+    //   "两侧留白只剩一半"的不对称，那才是真的难看）。
+    val ctx = LocalContext.current
+    val density = LocalDensity.current.density
+    val windowWidthDp = LocalConfiguration.current.screenWidthDp.dp
+    // 外屏宽只随密度变（物理尺寸是死的）⇒ 按 (ctx, density) 记忆即可，不随折叠重组
+    val outerWidthDp: Dp? = remember(ctx, density) {
+        outerScreenWidthDp(ctx, density)?.dp
+    }
+    // 当前站在哪块屏上 —— 走**全工程唯一判据**（[ScreenForm.probe]）。
+    // ⛔ 别用"窗口宽 < 512dp"自己判：**外屏横过来时窗口是 685dp**，那种写法会把它判成内屏
+    //   ⇒ 底栏退回"按外屏宽度封顶" ⇒ 两侧留白 124dp ≠ 下边距（正好破掉用户第 ③ 条）。
+    //   ⚠️ `ScreenForm` 判的是**最小边**（旋转不变）⇒ 外屏横过来仍然判成外屏。
+    // ⚠️ 键里带 `windowWidthDp`：折叠 / 转屏都会改它 ⇒ 判据跟着重算。
+    val ownForm = remember(ctx, windowWidthDp) { ScreenForm.probe(ctx).form }
+    val limitDp = if (ownForm == ScreenForm.OUTER) {
+        windowWidthDp
+    } else {
+        minOf(windowWidthDp, outerWidthDp ?: windowWidthDp)
+    }
+    val barWidth = (limitDp - BAR_MARGIN * 2).coerceAtLeast(BAR_MIN_WIDTH)
+
+    // 一次一行，值变了才打 —— 这行是"宽度到底算成了多少、外屏量到了多少"的唯一取证点
+    LaunchedEffect(barWidth, outerWidthDp, ownForm) {
+        Log.i(
+            TAG,
+            "底栏宽度 ${barWidth.value}dp（当前屏 ${ownForm.label}，上限 ${limitDp.value}dp；" +
+                "外屏量到 ${outerWidthDp?.value ?: "认不出"}dp，窗口 ${windowWidthDp.value}dp，" +
+                "密度 ${density}，留白 ${BAR_MARGIN.value}dp）",
+        )
+    }
+
     Row(
         modifier = modifier
-            // ★★ 2026-10-02：**不再铺满屏幕**（原 `.fillMaxWidth()`）。
-            //   用户原话：「悬浮底栏缩短一点，**就俩按钮没必要这么长**」。
-            //   ⇒ 宽度改由**条目数**决定（[BAR_WIDTH]），整条胶囊像一块真正"悬浮"的
-            //     药丸贴在底部中央，而不是一条横贯屏幕的栏。
-            //   ⚠️ 不能只删 `fillMaxWidth()` 改用 `wrapContentWidth()`：下面每个条目是
-            //     `Modifier.weight(1f)`，而 weight 分的是**剩余空间** —— Row 一旦没有确定
-            //     宽度，剩余空间为 0，条目会被压成 0 宽（底栏直接消失）。
-            //     所以必须给一个**确定的宽度**，weight 才有东西可分。
-            .width(BAR_WIDTH)
+            // ★★ 2026-10-06（取代 10-02 那版"条目数定宽"）：
+            //   用户原话「宽度太窄了，应该拉宽到**外屏的屏幕宽度**……外屏时的**下边距和左右边距相等**；
+            //   展开到内屏后，**依然按照外屏的宽度限制**」。
+            //   ⇒ 宽度不再由条目数决定，而是"外屏宽度 − 两侧留白"，见上面 [barWidth]。
+            //   ⚠️ 每个条目是 `Modifier.weight(1f)`，而 weight 分的是**剩余空间** ——
+            //     Row 必须有**确定宽度**，否则剩余空间为 0、条目被压成 0 宽（底栏直接消失）。
+            //     ⛔ 所以别把它换成 `wrapContentWidth()`。
+            .width(barWidth)
+            // ⚠️ 导航栏 insets：**本机手势导航下这个值是 0**（`dumpsys window displays` 里
+            //   内屏的 InsetsSource 只有 statusBars / displayCutout / ime / mandatorySystemGestures，
+            //   **没有 navigationBars**）⇒ 底边实得就是 [BAR_MARGIN]。
+            //   留着它是为了"三键导航 / 别家 ROM 报了 inset"时不把底栏压到系统键上 ——
+            //   代价是那种机器上底边会变成 `inset + BAR_MARGIN`（比左右略大）。
+            //   ★ 这是**刻意**的取舍：宁可底边略高，也不要和系统键叠在一起。
             .windowInsetsPadding(WindowInsets.navigationBars.only(WindowInsetsSides.Bottom))
-            // ⚠️ 只剩垂直留白：胶囊已经不再铺满屏幕，"左右边距"这个量没有意义了
-            //   （宽度完全由 [BAR_WIDTH] 决定；居中由调用方的 `align(BottomCenter)` 负责）。
-            //   ⛔ 别在这里加回 `horizontal =`：`width()` 之后的横向 padding 会从**胶囊内部**
-            //     再切掉一块，条目跟着变窄，而胶囊尺寸却不变 —— 那是"看不出来为什么变窄"的错。
-            .padding(vertical = BAR_VERTICAL_MARGIN)
+            // ★★ 下边距 = 左右边距（用户要求）。
+            //   ⚠️ 只用 `bottom =`、**不用 `vertical =`**：这里的元素被调用方 `align(BottomCenter)`，
+            //     上边那份 padding 既不改变胶囊位置、也不改变观感，只是白白把测量高度撑大一截
+            //     （上一版 `padding(vertical = BAR_VERTICAL_MARGIN)` 就是这种写法）。
+            //   ⛔ 别在这里加横向 padding：`width()` 之后的横向 padding 是从**胶囊内部**再切掉一块，
+            //     条目跟着变窄、胶囊尺寸却不变 —— 那是"看不出来为什么变窄"的错。
+            //     （横向留白由 `barWidth` 算式里的 `BAR_MARGIN × 2` 承担。）
+            .padding(bottom = BAR_MARGIN)
             .height(BAR_HEIGHT)
             .shadow(elevation = BAR_ELEVATION, shape = shape, clip = false)
             .then(
@@ -339,18 +428,15 @@ private fun rememberGravityHighlight(
 
 // ================================================================ 尺寸常量
 //
-// ★★ 2026-09-30 整体收小（用户反馈「悬浮菜单栏太大了，不美观」）。
-//   原来高 64dp / 图标 22dp / 文字 11sp，是一块"厚胶囊"：在外屏（视口 622dp 高）上，
-//   胶囊 + 上下留白共占 ~84dp ≈ 13.5% 的屏高，压得内容很紧。
-//   现在收到 54dp / 20dp / 10.5sp：
-//     - 垂直占用 54 + 8×2 = 70dp ≈ 11.2%，观感更轻。
-//     - 内容高度核算：上下 padding 6×2 + 图标 20 + 间距 1 + 文字行高 ~14 = 47dp < 54dp ✓
-//   ⚠️ 别把高度压到 48dp 以下：条目是**唯一的导航入口**，命中区太小会开始点不准。
-//
-// ★★ 2026-10-02 宽度也收（用户反馈「就俩按钮没必要这么长」）。
-//   高度那次只把"厚"解决了，宽度还是 `fillMaxWidth()` —— 两个条目把整条屏宽撑满，
-//   在外屏上是一条横贯屏幕的栏，跟"悬浮"两个字不搭。现在宽度 = 条目数 × [BAR_TAB_WIDTH]，
-//   整条胶囊缩到底部中央，才像一块浮在上面的药丸。
+// 演进（每一条都是用户的原话，⛔ 别改回去）：
+//   ★★ 2026-09-30 整体收小（「悬浮菜单栏太大了，不美观」）：64→54dp / 22→20dp / 11→10.5sp。
+//      ⚠️ 别把高度压到 48dp 以下：条目是**唯一的导航入口**，命中区太小会开始点不准。
+//   ★★ 2026-10-02 宽度改"条目数定宽"（「就俩按钮没必要这么长」）⇒ 两个条目时 **188dp**。
+//   ★★ 2026-10-06 **宽度又改回"宽"**（「太窄了，应该拉宽到外屏的屏幕宽度；外屏时下边距和
+//      左右边距相等；展开到内屏后依然按外屏的宽度限制」）⇒ 现在是
+//      `min(窗口宽, 外屏宽) − [BAR_MARGIN] × 2`。**这不是 10-02 那版的反悔**：
+//      10-02 抱怨的是"铺满屏、不像悬浮"，10-06 抱怨的是"太窄" —— 现在落在中间：
+//      比屏幕窄，但只窄两侧各 [BAR_MARGIN]。⛔ 别用 `fillMaxWidth()` 实现（那会变成 0 留白）。
 
 /**
  * 玻璃底栏的高度（含图标 + 文字）。
@@ -361,7 +447,23 @@ private fun rememberGravityHighlight(
 private val BAR_HEIGHT = 54.dp
 
 /**
- * **单个条目**的宽度。
+ * **底栏与屏幕边缘的统一留白**：左右各一份、**下边一份**（三边相等，2026-10-06 用户要求）。
+ *
+ * ★ 为什么取 16dp：
+ *   - 它是本工程 UI 规范里"卡片内外留白"的标准档（见 `docs/UI_设计规范_HyperOS_*`），
+ *     不是新引入的魔术数字；
+ *   - 比上一版**有效的**底边留白（8dp ＋ 0 的导航栏 inset，见下面 [LiquidGlassBar] 里那段
+ *     取证）翻了一倍 ⇒ 用户要的"往上调节一下"是**看得见**的，又不至于让底栏跟内容脱开；
+ *   - 页面内容的横向留白是 `UiCommon.PAGE_H_PADDING` = 12dp ⇒ 底栏比卡片**每侧窄 4dp**。
+ *     ⚠️ 这 4dp 是**有意的**：底栏是"浮"在内容之上的独立一层，跟卡片严丝合缝反而像
+ *     "内容的一部分"。要完全对齐就把这里改成 12dp（只此一处）。
+ * ★ "三边相等"只在本机这种**没有 navigationBars inset** 的手势导航下成立 ——
+ *   别的导航方式下底边会多出那一段 inset（取舍理由见 [LiquidGlassBar] 里的注释）。
+ */
+private val BAR_MARGIN = 16.dp
+
+/**
+ * **单个条目**的宽度 —— 2026-10-06 之后它**只用来算宽度下限**，不再直接决定宽度。
  *
  * ★ 88dp 是"够点、又不空"的取值：里面最宽的条目是「功能」两个字（10.5sp ≈ 22dp），
  *   加上图标 20dp 与条目自身的 `padding(vertical)`，横向富余很大；而条目是竖着排的
@@ -369,29 +471,116 @@ private val BAR_HEIGHT = 54.dp
  * ⚠️ 2026-10-03 多语言之后**最长的标签不再是中文**：英文 "Features"（8 字符，
  *   10.5sp ≈ 45dp）比「功能」宽一倍。核过：45dp + 两侧留白仍远小于 88dp ⇒ 无需改宽度。
  *   但**以后若把底栏做成三入口或换更长的词**，要照这条线重新核一遍（Column 不会自己换行）。
- * ⚠️ 它与 [BAR_HEIGHT] 一起决定了命中区（88×54dp）。改小要重新按这条线核一遍。
+ * ⚠️ 它与 [BAR_HEIGHT] 一起决定了命中区下限（88×54dp）。改小要重新按这条线核一遍。
  */
 private val BAR_TAB_WIDTH = 88.dp
 
-/** 条目区与胶囊边缘之间的留白（左右各一份，见 [BAR_WIDTH] 的算式） */
+/** 条目区与胶囊边缘之间的留白（左右各一份，[BAR_MIN_WIDTH] 的算式用） */
 private val BAR_INNER_PADDING = 6.dp
 
 /**
- * 整条胶囊的宽度 = **条目数决定的**，不铺满全屏（2026-10-02 用户：「就俩按钮没必要这么长」）。
+ * 胶囊宽度的**下限** = 2026-10-02 那一版的尺寸（条目数 × [BAR_TAB_WIDTH] ＋ 内侧留白×2）。
  *
- * ⚠️ 用 `HomeTab.entries.size` 而不是写死 `2`：以后加第三个入口时这里自动跟着长，
+ * ★ 留它的理由：正常路径算出来的宽度远大于它（外屏 467dp ⇒ 实得 435dp），
+ *   只有"外屏认不出 / 窗口比外屏还窄"那两条退路上才会碰到它。
+ * ⚠️ 用 `HomeTab.entries.size` 而不是写死 `2`：以后加第三个入口时下限自动跟着长，
  *   不会出现"新加的那个被挤扁"（高度那条教训的同源写法）。
  */
-private val BAR_WIDTH = BAR_TAB_WIDTH * HomeTab.entries.size + BAR_INNER_PADDING * 2
+private val BAR_MIN_WIDTH = BAR_TAB_WIDTH * HomeTab.entries.size + BAR_INNER_PADDING * 2
+
+/** 日志标签（本文件只有一条日志：宽度算成了多少） */
+private const val TAG = "HyperPlusLiquidGlassBar"
 
 /**
- * 距上方内容 / 下方导航条。
+ * **本机外屏的物理最小边**（像素）—— [outerScreenWidthDp] 的第 ② 条路。
  *
- * ⚠️ 2026-10-02：原来这里还有一个 [BAR_SIDE_MARGIN]（左右各 20dp），随"胶囊不再铺满屏幕"
- *   一并删掉了 —— 既然宽度由 [BAR_WIDTH] 说了算，再留一圈横向 padding 只会把胶囊**内部**
- *   的条目挤窄（`width()` 之后加的横向 padding 是往内切的），却看不出任何视觉理由。
+ * ★ 来源：`dumpsys display` 实证 —— 外屏 `DisplayDeviceInfo{"内置屏幕", 1168 x 1712, ...}`
+ *   （`displayId=1`，`FLAG_PRESENTATION`）。**是硬件事实，不是可调参数**。
+ *
+ * ★ 为什么第 ② 条路是"像素 + 除密度"而不是直接写 dp：
+ *   用户改「显示大小 / DPI」时 dp 值会整体变（本机现在 Override 就是 **400dpi（2.5x）**，
+ *   而不是物理的 440dpi）；写死 dp 会立刻过期，写像素则**永远跟着密度自己算对**。
+ *   （同样理由见 `ScreenForm` 类注释里"密度变了 dp 判据会串档"那段。）
+ *
+ * ⚠️ 这是一台固定机型的常量（和相机 burst、面板朝向偏置那几条同类）。换机型要重新量 ——
+ *   不过换机型时第 ① 条路（枚举更小的屏）大概率能自己接上，这个常量只是兜底。
  */
-private val BAR_VERTICAL_MARGIN = 8.dp
+private const val OUTER_MIN_SIDE_PX = 1168
+
+/**
+ * 「**外屏有多宽**」（dp，**本界面的 dp 坐标系**）。
+ *
+ * ★★ 为什么必须现算（本次最容易踩的坑）：项目文档里的「内屏 608dp / 外屏 425dp」是
+ *   **440dpi** 时期的值，而本机 `wm density` 的 Override density 现在是 **400dpi（2.5x）**
+ *   ⇒ 真实是 **外屏 1168 ÷ 2.5 = 467dp、内屏 1672 ÷ 2.5 = 669dp**。
+ *   照文档写死 425 会让底栏比屏幕窄 42dp（两侧各多出 21dp 空档）—— 那正是用户抱怨的"太窄"。
+ *
+ * ★★ **为什么不能直接用 `DisplayManager.displays`**（第一版就是这么写错的，真机日志
+ *   `认不出外屏（共 1 块）` 当场打脸）：**App 进程只看得到"自己那块屏"**。
+ *   项目里 `ActiveDisplay` 那一套能认出两块屏，是因为它跑在 **SystemUI 进程**（系统进程
+ *   拿得到全部 display）；`ui/` 里这么写就什么也拿不到。⇒ 必须另找口子，见下。
+ *
+ * ★ 取值顺序（两条路都写得出来，且**结果一致**）：
+ *   ① **枚举比本屏更小的那块**：候选 = `displays` ∪ `getDisplays(DISPLAY_CATEGORY_PRESENTATION)`。
+ *      本机外屏带 **`FLAG_PRESENTATION`**（`dumpsys display` 实证：
+ *      `DisplayInfo{..., FLAG_PRESENTATION, ...}`）⇒ PRESENTATION 类目是 App 进程可能拿到它的口子。
+ *      规则是"**取比本屏更小的那块**"而不是"按 id / 按形态认"—— 因为外屏**恒比内屏窄**
+ *      （1168 < 1672），"更小"这个判据不需要知道自己在哪块屏上、也不随 id 分配变化。
+ *   ② ①拿不到 ⇒ 用本机常量 [OUTER_MIN_SIDE_PX]（外屏物理最小边，`dumpsys display` 实证）。
+ *      ⚠️ 常量是**像素**、再除以本界面密度 ⇒ 用户改「显示大小」时它自动跟着对，不会过期。
+ *
+ * ⚠️ px→dp 用**本界面的密度**（调用方从 `LocalDensity` 取），而不是
+ *   `Display.getRealMetrics().densityDpi`：本机那两者是 **2.5 与 2.75**，
+ *   而"底栏该有多宽"问的是**本界面坐标系里的宽度** ⇒ 必须用本界面的密度。
+ *
+ * @return null = 连本屏尺寸都读不到（见 [DisplaySize.of] 的三条退路）⇒ 调用方退当前窗口宽
+ */
+private fun outerScreenWidthDp(context: Context, density: Float): Int? {
+    if (density <= 0f) return null
+
+    // 本屏的物理最小边 —— 走全工程唯一量法（DisplaySize），⛔ 别在 UI 里另写一份
+    val ownPx = runCatching { DisplaySize.of(context).smallestSidePx }.getOrNull()
+        ?.takeIf { it > 0 } ?: return null
+
+    val cand = smallestCandidateMinSidePx(context)
+    val px = if (cand != null && cand < ownPx) cand else OUTER_MIN_SIDE_PX
+    val src = if (cand != null && cand < ownPx) "枚举到更小的屏" else "本机常量"
+    Log.i(TAG, "外屏宽度取 $px px（$src；本屏 $ownPx px，候选最小 ${cand ?: "读不到"} px）")
+    return (px / density + 0.5f).toInt()
+}
+
+/**
+ * 能枚举到的那些 display 里，**最小的物理最小边**（px）。读不到返回 null。
+ *
+ * ★ 为什么要凑两个来源：`displays` 在 App 进程通常只有自己那块，
+ *   而 PRESENTATION 类目才可能带回别的屏（本机外屏带 `FLAG_PRESENTATION`）。
+ *   ⚠️ 两个来源按 `displayId` 去重，避免同一块屏算两次（无害但会让日志读数变乱）。
+ */
+private fun smallestCandidateMinSidePx(context: Context): Int? {
+    val dm = context.getSystemService(DisplayManager::class.java) ?: return null
+    val all = buildList {
+        runCatching { addAll(dm.displays) }
+        runCatching { addAll(dm.getDisplays(DisplayManager.DISPLAY_CATEGORY_PRESENTATION)) }
+    }.distinctBy { it.displayId }
+    return all.mapNotNull { minSidePxOf(it) }.minOrNull()
+}
+
+/**
+ * 一块 display 的**物理最小边**（px）——`mode` 优先（物理尺寸、旋转不变），
+ * 读不到再退 `getRealMetrics()`（跨屏访问受限时 `mode` 会返回 null）。
+ */
+private fun minSidePxOf(display: Display): Int? {
+    runCatching { display.mode }.getOrNull()?.let { m ->
+        val px = minOf(m.physicalWidth, m.physicalHeight)
+        if (px > 0) return px
+    }
+    val dm = DisplayMetrics()
+    return runCatching {
+        @Suppress("DEPRECATION")
+        display.getRealMetrics(dm)
+        minOf(dm.widthPixels, dm.heightPixels).takeIf { it > 0 }
+    }.getOrNull()
+}
 
 /** 投影。用经典 `Modifier.shadow`（稳定 API）而不是示例里的 `dropShadow`（较新的实验 API） */
 private val BAR_ELEVATION = 8.dp

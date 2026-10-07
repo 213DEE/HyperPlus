@@ -256,15 +256,6 @@ class AdaptiveEngine(
         val hintAlive: Boolean = false,
 
         /**
-         * 「实测不可控」名单的条数（A 方案，2026-09-29）。
-         *
-         * ★ 它是**唯一**能证明"那条记录真的落盘了"的读数 —— 写了但没生效是最坏的情况：
-         *   用户以为以后不弹按钮了，实际还会弹。所以这个数走总线报给界面 / 诊断页。
-         * ⚠️ 同样只在巡检时采样（见 [hintAlive] 的理由）。
-         */
-        val uncontrollableCount: Int = 0,
-
-        /**
          * 引擎**实测**到的最小边宽度（dp）—— 形态判据的原始输入。
          *
          * ★ 为什么单独报这一个数（2026-09-29 用户报「内屏桌面旋转没反应」时加的）：
@@ -435,6 +426,27 @@ class AdaptiveEngine(
     @Volatile private var burstFrameCount = 0
 
     /**
+     * ★★ **本轮采样里有没有出现过"一帧可用的人脸"**（R1，2026-10-05）。
+     *
+     * 判据 = [pickRoll] 给了非 null 的结果（脸数 > 0、不是低置信、角度可读）。
+     * ⚠️ **刻意复用 `pickRoll`**（就是 [onFrame] 里那个 `roll`），不另立标准 ——
+     *   两套口径迟早分叉，那时会出现"按钮弹了、界面却显示还在自适应"这种谁都没错的怪状态。
+     * 生命周期与 [burstFrameCount] 完全一致：[startBurst] 清、[onFrame] 置、[finishBurst] 读。
+     */
+    @Volatile private var burstHadUsableFace = false
+
+    // ---- R1（2026-10-05）：自适应读不到环境时**临时**降级半自动 -------------------
+    //
+    // ★ 整份状态是**一个不可变对象 + 一个 `@Volatile` 引用**（而不是四个散字段）：
+    //   它写在 [finishBurst]（分析线程）、读在 [mode]（传感器线程 / 主线程都会调）。
+    //   并成一份之后**不会读到"半更新"**（比如 `downgraded` 已置 true、探测窗口还没推）。
+    //   状态转移本身是纯逻辑，在 [AdaptiveFallback] 里 —— 那个有单测。
+    //
+    // ⚠️ 它**只描述引擎自己的临时状态**，与用户配的那一档毫无关系：
+    //   降级**不写** `AppPrefs`（见 [mode] 那条注释）。
+    @Volatile private var r1 = AdaptiveFallback.State()
+
+    /**
      * 最近一帧到达的时刻（[SystemClock.elapsedRealtime]），只在 [onFrame] 里更新。
      *
      * ★ 用途：**判断"我们还握着相机"这句话还成不成立**（见 [sessionLooksDead]）。
@@ -513,7 +525,8 @@ class AdaptiveEngine(
      *   它就是"让我看一眼"。按钮本身还是那个按钮，点下去照样走 [applySemiRotation]
      *   （写方向 + 读回），所以它也**不能**当"绕过传感器"用。
      *
-     * ⚠️ **冷启动首次只记账**（与 [handleUncontrollableClearRequest] 同一个坑）：
+     * ⚠️ **冷启动首次只记账**（“首次”语义必须有**独立**的第一状态，不能借值域里的
+     *   特殊值冒充 —— 本工程为这个坑失过一次手）：
      *   配置通道的 StateFlow 会重放持久化下来的历史值，而这个键长期停在最后一次点击上
      *   ⇒ 不挡的话，每次软重启 SystemUI 都会在屏幕右下角凭空弹一个按钮。
      *
@@ -566,37 +579,6 @@ class AdaptiveEngine(
 
     /** 待确认的任务 —— 存成字段是为了能被 `removeCallbacks` 取消（见 [cancelSemiSettle]） */
     private val semiSettleRunnable = Runnable { confirmSemiHint(semiSettleReason) }
-
-    // —— ★ 实测不可控名单（A 方案，2026-09-29）——
-
-    /**
-     * 不可控名单的本地缓存（`Settings.System` 里那整串值）。
-     *
-     * ★ 为什么要缓存：这条判据在**每次触发 + 每 [FOREGROUND_POLL_MS] 巡检**时都要看一眼，
-     *   一天几百上千次 `ContentResolver` 查询 —— 而名单几乎永远不变。
-     *   缓存 [UNCONTROLLABLE_TTL_MS] 后代价降到分钟级一次，而写入方
-     *   （[markUncontrollable]）会主动刷缓存 ⇒ **本进程自己的改动零延迟可见**，
-     *   TTL 只用来兜"别处改了它"（用户点了清除、或手改了键值）。
-     */
-    @Volatile private var uncontrollableCache = ""
-
-    @Volatile private var uncontrollableCacheAt = 0L
-
-    /** 最近一次**已处理**的"清除请求"取值（App 每点一次清除就写一个新时间戳） */
-    @Volatile private var uncontrollableClearSeen = ""
-
-    /**
-     * 是否已经"认过路"（冷启动后的第一次读数只记账、不动作）。
-     *
-     * ★★ 这个**独立的布尔**是修 bug 修出来的（2026-09-29 真机验证抓到）：
-     *   第一版拿 [uncontrollableClearSeen] **是不是空串**来判断"有没有读过"，
-     *   但"读到的值确实是空"（还没人点过清除）与"还没读过"是**同一个值** ——
-     *   于是冷启动后的**第一次真实清除请求会被当成"首次记账"丢掉**。
-     *   真机复现：把 `uncontrollable_clear` 从"不存在"改成"一个新时间戳"，
-     *   引擎收到后什么都不做（名单纹丝不动）。
-     *   ⇒ 凡是"首次"语义，就必须有**独立的**第一状态，不能借值域里的一个特殊值充当。
-     */
-    @Volatile private var uncontrollableClearPrimed = false
 
     /** 写方向的**读回代次**：每次排期都 +1，旧任务据此自我作废（只在主线程读写） */
     private var semiReadbackGen = 0
@@ -689,61 +671,30 @@ class AdaptiveEngine(
     /** 最近 1.5s 的 roll 样本，供标定取中位数 */
     private val recentRolls = ArrayDeque<Pair<Long, Float>>()
 
-    /**
-     * ★★ **实时角度预览**是否开着（2026-10-01 新增）。
-     *
-     * 用户原话：「在方向校准里面加一个实时的角度显示，我告诉你正确方向」。
-     * 界面进「方向校准」时把它置 true（走 [AppPrefs.anglePreview] → prefs 文件 → 引擎），
-     * 引擎据此**持续开前摄采帧**并把实时角度写到 `hyperplus_bus_live_angle`。
-     *
-     * ⚠️ **它只管"预览循环活不活"，不再管"能不能写方向"**（2026-10-02 改）。
-     *   上一版让它兼任 [applyRotationIfNeeded] 的第一道闸（预览期间一律不写方向），
-     *   听着合理，但真机后果是**把屏幕冻在陈旧值上**：用户看到"屏幕朝左躺"时，
-     *   引擎其实一直算的是 3，只是被这道闸压着没写（铁证见 [applyRotationIfNeeded] 顶部）。
-     *   ⛔ 别再把它加回写方向那条路上 —— 仪表不准改变被测量的东西。
-     */
-    @Volatile private var previewHold = false
-
-    /**
-     * 预览的**到点时间**（`elapsedRealtime`）—— 超过它未续期就自停。
-     *
-     * ★★ 2026-10-02 新增（原来是个局部变量）。为什么必须能续期 —— 实测踩到：
-     *   上一版把它写死成"开一次只活 [PREVIEW_MAX_MS]"，而界面**没有任何续期动作**
-     *   （`DisposableEffect` 只在进入这一页时置一次 true，StateFlow 不会重复发同一个值）。
-     *   后果：用户在「方向校准」页做"合上→展开→再合上"这套对照动作时，
-     *   读数**在他做完之前就静默停了**，他看到的其实是**上一次的陈旧值** ——
-     *   这正是 2026-10-01 那两轮取数全部失败的原因（日志铁证：
-     *   `实时角度：停止读数（超过 180 秒未收到界面续期）`，而那一轮要测的内屏一段都没采到）。
-     *
-     * ⇒ 续期判据用**前台包名**（引擎自己就有，见 [ForegroundProbe]）：只要
-     *   HyperPlus 还停在前台，就说明用户还看着这一页，续到下一个 [PREVIEW_MAX_MS]。
-     *   ⚠️ 这样仍然守得住原来的三条纪律：按 Home / 切走 ⇒ 不再续 ⇒ 最多 [PREVIEW_MAX_MS]
-     *   内自己停（不会"没人看还一直开相机"）；离开这一页 ⇒ 界面本来就会置 false 直接停。
-     */
-    @Volatile private var previewUntil = 0L
-
-    /** 预览采样的循环（见 [setAnglePreview]）；null = 没在跑 */
-    private var previewJob: Job? = null
-
-    /**
-     * 实时角度**上一次真正写出去的内容**（不含末尾那个时间戳）—— 用于"没变就别写"。
-     *
-     * ★★ 2026-10-03 新增。理由是一个实测出来的浪费：那行读数的**末尾带着
-     *   `elapsedRealtime()` 时间戳**（App 靠它判"这条读数还活着吗"，见 [LiveAngle.Sample]），
-     *   ⇒ 一行里只要有时间戳，**每 250ms 写一次的内容就永远不可能相同**，
-     *   于是 4Hz × 最长 180 秒（≈720 次）**一次都省不掉** —— 哪怕用户把手机平放着不动、
-     *   角度读数一个字都没变。
-     *   ⇒ 改成：**内容没变时降到 [LIVE_ANGLE_IDLE_MS] 一次**（仍远小于读侧的
-     *     `LiveAngle.STALE_MS = 1500ms`，界面不会因为降频而误报"读数已停"）。
-     *   动起来时**照旧 4Hz** —— 那才是这个方法存在的意义，不能为了省那点写入把观感弄钝。
-     */
-    private var lastLiveAngleBody: String? = null
-
-    /** 上一次真正写出去的时刻（`elapsedRealtime`），配合 [lastLiveAngleBody] 判"该写了吗" */
-    private var lastLiveAngleAtMs = 0L
-
     /** 前摄传感器朝向（硬件常量），懒加载 —— 作为图像旋转的固定基准 */
     private val sensorOrientation: Int by lazy { readFrontSensorOrientation() }
+
+    /**
+     * ★★★ **前台包名**（R2 起是"取档"的输入）。
+     *
+     * 每次 [refreshForegroundGate] 判定时写入；**读不到就置 `null`** ⇒ [mode] 回落全局档。
+     * 改造前前台包只用于"要不要停手"（二值），R2 之后它同时决定**按哪一档干活**
+     * （跟随全局 / 跟随系统 / 自适应 / 半自动，见 [AppPrefs.modeFor]）。
+     *
+     * ⚠️ 它只是一次**读数**的缓存，不是账 —— 判据永远现算（[AppPrefs.modeFor]），
+     *   ⛔ 别把它当成"真值来源"四处传，也别在别处直接读它算档。
+     */
+    @Volatile private var fgPkg: String? = null
+
+    /**
+     * ★★ 引擎当前**是否已进入介入态**（触发层在跑 + 已接管方向盘）。
+     *
+     * 引入它只为让 [syncEngagement] 幂等：全局档与逐应用档两条流都会调它，
+     * 而 `StateFlow.collect` 订阅那一刻**立刻重放当前值** ⇒ 没有这个记账的话，
+     * 引擎启动时会白接管一次（多写两笔 Settings）。
+     * ⚠️ `engageTakeover()` 自身是幂等的（见那边的注释），这里只是省掉一次无谓的写。
+     */
+    @Volatile private var engagementOn = false
 
     // ============================================================ 生命周期
 
@@ -807,20 +758,6 @@ class AdaptiveEngine(
             }
         }
 
-        // ★ 用户点了"清除实测不可控记录" → 代他删掉 `Settings.System` 里那张名单。
-        //
-        //   为什么绕这一圈（App 写 prefs、引擎代删）见 [PrefsBridge.UNCONTROLLABLE_CLEAR]：
-        //   **App 没有 WRITE_SETTINGS**，删不了那个键；而引擎是特权包，直删免 root。
-        //
-        //   ⚠️ StateFlow 收集会**立刻重放当前值** —— 那个值是历史上最后一次点击留下的
-        //     时间戳，不是"现在要清"。所以 [handleUncontrollableClearRequest] 里
-        //     第一件事是"冷启动首次只记账"，否则引擎每重启一次就清空一次用户记录。
-        scope.launch {
-            AppPrefs.uncontrollableClearReq.collect { req ->
-                runCatching { handleUncontrollableClearRequest(req) }
-            }
-        }
-
         // ★ 用户点了"预览旋转按钮" → 直接弹一次按钮（**只为看外观**，见 [PrefsBridge.HINT_TEST]）。
         //
         //   为什么必须有这个入口：按钮只在传感器判定"设备姿态 ≠ 屏幕方向"时出现，而**传感器
@@ -836,52 +773,24 @@ class AdaptiveEngine(
             }
         }
 
-        // ★★ 实时角度预览（2026-10-01 新增）：界面进了「方向校准」⇒ 持续开前摄采帧，
-        //   把实时角度写到 `hyperplus_bus_live_angle` 给界面看。见 [setAnglePreview]。
+        // 模式变化（**全局档**与**逐应用档**两条流）→ 启停触发层 + 接管/交还。
         //
-        //   ⚠️ StateFlow 收集会**立刻重放当前值**，而那个值可能是"上次界面没关掉"留下的
-        //     （App 崩溃 / 被系统杀掉 / 用户按 Home）。若照它开，引擎就会**在没人看的
-        //     时候**白开前摄 —— 耗电，还可能撞上系统的「注视感知」取像进程。
-        //     ⇒ 与 [showHintForTest] 同一套做法：**冷启动首次只记账，不当动作**。
-        //     代价只是"引擎重启前就打开着的那一页要重开一次"，可接受。
-        var previewPrimed = false
-        scope.launch {
-            AppPrefs.anglePreview.collect { on ->
-                if (!previewPrimed) {
-                    previewPrimed = true
-                    if (on) {
-                        event("实时角度：界面开着，但引擎刚启动 —— 先不采（重开一次「方向校准」即可）")
-                        return@collect
-                    }
-                }
-                runCatching { setAnglePreview(on) }
-            }
-        }
-
-        // 模式变化 → 启停触发层 + 接管/交还（方案 b）
+        // ★★ 2026-10-05（R2）判据换人：从"全局档 engage 不 engage"改成 [AppPrefs.engagesAny]。
+        //   原因：存在「全局档 = 跟随系统，但某个应用被点名成自适应」这种组合 ——
+        //   那时全局档不 engage，只看它会**整个引擎都不启动**，用户的点名等于没设。
+        //
+        //   ⚠️ **两条流都要收**：全局档（[AppPrefs.mode]：换模式 / 折叠换屏）与
+        //     逐应用档（[AppPrefs.appModes]）。漏掉后者的症状很隐蔽 ——
+        //     "全局档是跟随系统时，新点名的那个应用要等下一次引擎重启才生效"。
+        //   两条都汇进同一个 [syncEngagement]，由它内部的 [engagementOn] 记账保证幂等。
         scope.launch {
             AppPrefs.mode.collect { m ->
-                val first = _ui.value.mode != m
                 _ui.update { it.copy(mode = m) }
-                if (m.engages) {
-                    startTrigger()
-                    if (first) engageTakeover()
-                } else {
-                    stopTrigger()
-                    if (first) releaseTakeover()
-                }
-                // ★ 切走半自动时立刻收掉可能还挂着的按钮：它是"上一次判定"的产物，
-                //   模式都换了就不该继续挂在屏幕上等人点。
-                //   ⚠️ **同时要取消"待确认"**（2026-09-29）：姿态稳定确认是延迟 280ms 的，
-                //      漏掉这步的话会出现"模式都已经切走了，280ms 后按钮又自己冒出来"。
-                if (m != RotateMode.SEMI) {
-                    cancelSemiSettle()
-                    runCatching { overlayRef?.hide() }
-                }
-                // ★ 模式变了 ⇒ 前台门的判据档位也跟着变（自适应严格 / 半自动宽松），
-                //   立刻重判一次，别等下一轮巡检（最多要等 [FOREGROUND_POLL_MS]）。
-                if (first) runCatching { refreshForegroundGate("模式切换") }
+                syncEngagement("模式切换")
             }
+        }
+        scope.launch {
+            AppPrefs.appModes.collect { syncEngagement("逐应用档切换") }
         }
         scope.launch {
             AppPrefs.strategy.collect { s ->
@@ -937,21 +846,167 @@ class AdaptiveEngine(
         ensureProvider()
         registerAvailability()
 
-        if (AppPrefs.mode.value.engages) {
-            startTrigger()
-            engageTakeover()
-        }
+        // ★★ 启动时的启停判据也走同一个 [syncEngagement]（R2 起 = [AppPrefs.engagesAny]）。
+        //   ⚠️ 别在这里另写一份 `if (mode.engages)` —— 那份会漏掉"逐应用点名"，
+        //     症状是"全局档跟随系统时，被点名成自适应的应用在整个引擎里都没反应"。
+        //   ⚠️ 它与上面那两条 `collect` 是**同一个函数的两次调用**（collect 订阅即重放），
+        //     靠 [engagementOn] 记账保证"只真接管一次" —— 谁先谁后都成立。
+        syncEngagement("引擎启动")
+
         // 前台门控巡检：与触发层同生共死。循环体内自判条件（模式为 SYSTEM / 触发层
         // 没在跑时直接跳过、一次 IPC 都不发），所以这里无条件启动即可。
         startForegroundWatch()
-        event("引擎启动（模式=${AppPrefs.mode.value.label}）")
+        event("引擎启动（模式=${AppPrefs.mode.value.label}｜逐应用点名 ${AppPrefs.appModes.value.size} 个）")
+    }
+
+    /**
+     * ★★★ **按前台应用取档**（R2，2026-10-05）—— 引擎里**唯一**该回答"按哪一档干活"的地方。
+     *
+     * 改造前引擎读的是 `AppPrefs.mode.value`（全局一档管所有应用，共 14 个读点）；
+     * R2 之后每个应用可以单独点名 ⇒ 那些读点全部换成这里。
+     *
+     * ★ 回落规则（见 [AppPrefs.modeFor]）：读不到前台包 ⇒ 用**全局档**。
+     *   判错方向的代价不对称 —— 多干一点活的代价只是耗电，凭空停手的代价是"功能消失"。
+     *
+     * ⚠️ 每次都现算（不看缓存）：用户改一个应用的档之后，下一次触发 / 巡检就用新档，
+     *   不需要重启任何东西。
+     */
+    private fun mode(): RotateMode {
+        val m = AppPrefs.modeFor(fgPkg)
+        // ★★★ R1（2026-10-05）：自适应"读不到环境"时**临时**按半自动干活。
+        //   ⚠️ 只改**本函数返回的答案**，一个字都不动 `AppPrefs` 里用户配的那一档 ——
+        //     与"安全开关的真值只能放在 App prefs"是同一条纪律：
+        //     **引擎不许偷偷改用户的配置**。用户退出降级条件后，档位原封不动地回来。
+        //   ⚠️ 为什么降级后要走 SEMI 而不是"自适应 + 兜底弹按钮"：半自动**不开相机**，
+        //     而暗光下开相机是纯浪费（本来就拍不到脸）—— 这正是半自动"最省电"的由来。
+        //     代价是引擎从此不再知道环境变没变，那个缺口由 [r1DowngradeNow] ③ 补。
+        if (m == RotateMode.ADAPTIVE && r1DowngradeNow()) return RotateMode.SEMI
+        return m
+    }
+
+    /**
+     * ★★ R1：此刻是否处于"临时降级成半自动"的状态（**纯读**，不写任何字段）。
+     *
+     * ⚠️ **必须纯读**：[mode] 被十几处调用，其中不少是"读一眼"的场合
+     *   （前台门刷新、界面展示、`applySemiRotation` 的早退判据）。一旦它带副作用，
+     *   那些地方会**顺手把探测窗口消耗掉** —— 症状是"降级之后再也没回到自适应"，
+     *   而且因为消耗点不在触发路径上，极难查。⇒ 推进窗口的那一句只写在 [noteAdaptiveEnv] 里。
+     *
+     * 判据三条，缺一不可：
+     * ```
+     * ① 用户在界面里开着这个功能（[AppPrefs.r1Fallback]，出厂默认开）
+     * ② 引擎确实判过"环境不可用"（[r1Downgraded]）
+     * ③ 现在**不在**探测窗口里 —— 到了窗口就放行一次真正的自适应，
+     *    那是"环境恢复就自动切回"唯一的手段（见 [R1_PROBE_INTERVAL_MS]）
+     * ```
+     * ★ ③ 的反向读法同样要紧：**窗口外的触发一律走半自动**，所以降级的意义
+     *   （"暗光下别再白开相机"）才真的成立。
+     */
+    private fun r1DowngradeNow(): Boolean =
+        AppPrefs.r1Fallback.value &&
+            AdaptiveFallback.isDowngradedAt(r1, SystemClock.elapsedRealtime())
+
+    /**
+     * ★★★ R1：自适应这一轮"读不到环境"的记账（2026-10-05，分析线程调用）。
+     *
+     * 逐轮累积，攒够 [R1_MISS_ROUNDS] 就把引擎临时切成半自动；任一**成功**的轮次立刻切回。
+     *
+     * ★ 恢复只要求**一轮成功**、不做"连续 M 轮"的滞回 —— 代价不对称：
+     *   多等一轮 = 用户多转一次手机没反应；而早一轮恢复，最坏只是下一轮又被降回去。
+     *   真正的防抖交给 [R1_RECOVER_COOLDOWN_MS] 那道冷却。
+     *
+     * @param hadFace 本轮有没有出现过可用人脸（= [burstHadUsableFace]）
+     * @param frames 本轮采到的帧数。调用点已保证 `> 0`。
+     */
+    private fun noteAdaptiveEnv(hadFace: Boolean, frames: Int) {
+        // ★ 功能关掉时**连状态一起清**：否则用户"关掉 → 又打开"，会带着关闭期间
+        //   攒下的 miss 计数**立刻**降级一次 —— 而他在关的那一刻并没有这个预期。
+        if (!AppPrefs.r1Fallback.value) {
+            r1 = AdaptiveFallback.State()
+            return
+        }
+        // ★ 转移全在纯函数 [AdaptiveFallback.step] 里（有单测）；本函数只负责
+        //   "喂输入 → 落状态 → 按结果做副作用"。⛔ 别把判据搬回这里 ——
+        //   一旦判据分散，测试就再也钉不住它了。
+        val (next, kind) = AdaptiveFallback.step(r1, SystemClock.elapsedRealtime(), hadFace)
+        r1 = next
+        when (kind) {
+            AdaptiveFallback.Kind.ENTER -> event(
+                "自适应：连续 ${next.missStreak} 轮没读到人脸（本轮 $frames 帧，一帧可用的都没有）" +
+                    " ⇒ 临时降级半自动；每 ${R1_PROBE_INTERVAL_MS / 1000} 秒试一次能不能恢复",
+            )
+
+            AdaptiveFallback.Kind.EXIT -> {
+                event("自适应：又读到人脸了 ⇒ 退出降级、恢复自动旋转")
+                // ★ 降级期间弹出来的按钮此刻**必须收掉**：模式已经回到自适应，而那个
+                //   按钮挂在屏幕上就是误导（点下去会走 `applySemiRotation`，它自己会因
+                //   `mode() != SEMI` 早退、不会写错方向，但用户体验是"点了没反应"）。
+                //   ⚠️ 窗口操作必须回主线程（见 [onMain]），而本函数跑在分析线程上。
+                onMain {
+                    cancelSemiSettle()
+                    runCatching { overlayRef?.hide() }
+                }
+            }
+
+            AdaptiveFallback.Kind.NONE -> Unit
+        }
+    }
+
+    /**
+     * ★★★ **把"引擎该不该介入"对齐到当前配置**（R2 起是本引擎启停的**唯一入口**）。
+     *
+     * 触发它的事件有三类：① 引擎启动；② 全局档变化（换模式 / 折叠换屏）；
+     * ③ 逐应用档变化（界面上的四选一）。
+     *
+     * ★ 判据是 [AppPrefs.engagesAny]，**不是** `mode().engages` —— 理由是：
+     *   存在「全局档 = 跟随系统，但某个应用被点名成自适应」这种组合，
+     *   只看全局档会导致**整个引擎都不启动**，用户的点名等于没设。
+     *
+     * ★★ 幂等靠 [engagementOn] 记账：`StateFlow.collect` 订阅那一刻会立刻重放，
+     *   而启动路径也会调一次 ⇒ 没有记账就会白接管一次。
+     *   ⚠️ 记错也不会造成故障：`engageTakeover()` 自身幂等（见那边的注释），
+     *     最多多写两笔 Settings。
+     */
+    private fun syncEngagement(reason: String) {
+        val engage = AppPrefs.engagesAny
+        val was = engagementOn
+        engagementOn = engage
+        if (engage) {
+            // ★ 只在"状态真的翻转"时才动，避免每次改一个应用的档都白跑一遍
+            //   startTrigger（它会打一行"触发层已恢复"，纯噪音）。
+            if (!was) {
+                startTrigger()
+                engageTakeover()
+            }
+        } else {
+            if (was) {
+                stopTrigger()
+                releaseTakeover()
+            }
+        }
+        // ★ 收掉"上一次判定"留下的半自动按钮：它挂在窗口上，档都换了就不该继续等人点。
+        //   ⚠️ **同时取消"待确认"**（2026-09-29）：姿态稳定确认延迟 280ms，
+        //     漏这步会出现"档都切走了，280ms 后按钮又自己冒出来"。
+        if (mode() != RotateMode.SEMI) {
+            cancelSemiSettle()
+            runCatching { overlayRef?.hide() }
+        }
+        // ★ 档变了 ⇒ 前台门的结论也跟着变，立刻重判一次（别等下一轮巡检，最多等
+        //   [FOREGROUND_POLL_MS]）。这一调同时把 [fgPkg] 刷成最新。
+        runCatching { refreshForegroundGate(reason) }
+        _ui.update { it.copy(mode = mode()) }
     }
 
     fun stop() {
         stopTrigger()
-        // ★ 实时角度预览必须一起停（2026-10-01）：它的循环持有相机。
-        //   漏了这句的话，引擎停了相机还在采 —— 而那时已经没人读那个读数了。
-        stopAnglePreview("引擎停止")
+        // ★ R2（2026-10-05）：停掉引擎 ⇒ 介入态归零。不归零的话，
+        //   下一次 [syncEngagement] 会以为"还开着"而跳过 startTrigger/engageTakeover，
+        //   引擎就再也起不来了（症状：软重启 SystemUI 后方向功能整个失效）。
+        engagementOn = false
+        // ★ R1（2026-10-05）：降级状态一并无条件归零。引擎都停了，"环境不可用"这个
+        //   **临时**结论没有继续成立的理由 —— 留着它会让下次启动**第一次**触发
+        //   就直接走半自动（用户看到的将是"重启后自适应不工作了"）。清零后从零重新判。
+        r1 = AdaptiveFallback.State()
         // ★ 半自动的按钮是"挂在窗口上的"，引擎停了必须收掉 ——
         //   否则它会一直停在屏幕右下角，等自己的倒计时走完才收走，
         //   但那个 View 的回调指向一个已经停掉的引擎（点下去等于什么都没发生）。
@@ -1034,9 +1089,12 @@ class AdaptiveEngine(
      *   ⚠️ **2026-09-29 用户要求改掉**：本应用现在是名单里的普通一行、默认**不**豁免，
      *   想让它跟随系统就在界面上勾一下（理由见 [AppWhitelist] 类注释）。
      *
-     * ★★ **两条豁免**（2026-09-29 收敛）：① 生效白名单命中；② [Uncontrollable] 判中的
-     *   **实测不可控**。同一天删掉了"外屏桌面"与"按应用声明判外屏豁免"两条 ——
-     *   前者随外屏增强一起没了，后者判错对象被用户当场抓到（详见函数体内那段注释）。
+     * ★★ **一条豁免**（2026-10-05 收敛）：生效白名单命中。
+     *   ⛔ 原来的第二条「实测不可控」（原 `Uncontrollable`，A 方案）已按用户点名**整个删除**
+     *   —— 它的结尾从"记住并永久停手"改成了"转不动就弹一次「旋转失败」"
+     *   （见 [scheduleSemiReadback] / [notifyRotateFailed]）。
+     *   ⇒ 引擎**不再有任何"自己写进去的豁免"**：停手与否只由用户配置的那份名单决定。
+     *   （更早删掉的"外屏桌面"与"按应用声明判外屏豁免"两条见函数体内那段注释。）
      *
      * @return 是否**读到了**前台应用。false = 读不到 ⇒ 调用方**不得**据此停手。
      */
@@ -1045,11 +1103,17 @@ class AdaptiveEngine(
         //   ⚠️ 必须主动 [leaveForegroundGate]：光"不再新判"是不够的 —— 已经停手、
         //   已经把方向盘交还给系统的状态不会自己回来，屏幕仍然是死的。
         if (!AppPrefs.gateEnabled.value) {
+            // ★ R2：门控整个不生效 ⇒ **逐应用点名也一并失效**（门控关掉 = "别管前台是谁"），
+            //   所以把前台读数清成"不知道"⇒ [mode] 回落全局档。
+            fgPkg = null
             leaveForegroundGate()
             return false
         }
         val info = runCatching { fgProbe.read() }.getOrNull()
         if (info == null) {
+            // ★ R2 同上：读不到前台应用 ⇒ 没有"逐应用"这个维度可用 ⇒ 回落全局档。
+            //   宁可退回改造前的行为（全局一档管所有），也不许拿一个陈旧的包名去取档。
+            fgPkg = null
             // ★ 失败计数（2026-10-03）：读不到 ⇒ **门控整个不生效**（下面的行为一个字不改，
             //   但这件事实必须能被界面读到，否则用户会以为门控在工作）。见 [EngineErrors]。
             EngineErrors.bump(EngineErrors.FOREGROUND)
@@ -1061,14 +1125,15 @@ class AdaptiveEngine(
             }
             return false
         }
-        // ★★ 判据现在是**两条豁免**（2026-09-29 收敛）：
+        // ★★ 判据现在**只有一条**：**生效白名单**（用户 2026-09-28 拍板：
+        //   「白名单应用不受 app 控制」）。名单只有一份（外屏增强删掉之后，
+        //   "按形态取名单"就没有意义了），算法见 [AppWhitelist.resolve]。
         //
-        //   ① **生效白名单**（用户 2026-09-28 拍板：「白名单应用不受 app 控制」）。
-        //      名单只有一份（外屏增强删掉之后，"按形态取名单"就没有意义了），
-        //      算法见 [AppWhitelist.resolve]。
-        //   ② **实测不可控**（[Uncontrollable]，A 方案，2026-09-29 用户拍板）：
-        //      引擎真的写过方向、屏幕两次读回都没变 ⇒ 此后静默停手。
-        //      它是**纯观测**的判据，不解释原因，所以也不存在"解释错"这种失败模式。
+        //   ⛔ 原来的第二条「实测不可控」（原 `Uncontrollable`，A 方案）已于 2026-10-05
+        //      按用户点名**整个删除**（原话：「删掉旋转增强"发现转不动就不再控制"的这个功能，
+        //      换成转不动就弹 toast 提示"旋转失败"」）⇒ 现在转不动只弹一次提示，
+        //      **不落盘、不改后续行为**。这也是本工程最后一条"用观测结果反推判据"的机制 ——
+        //      删掉之后，引擎对"该不该停手"的判断**只剩用户配置**这一个来源。
         //
         //   ⛔ 同一天删掉的两条判据（都是"推断"，各被用户抓到一次真错，别再捡回来）：
         //     - **外屏桌面**（原 `OuterDesktopGate`）：外屏的旋转增强整个删了
@@ -1078,12 +1143,17 @@ class AdaptiveEngine(
         //       旋转的，但被识别成不可旋转，强制豁免了，还关不掉」。病根是判据读错了对象 ——
         //       界面读的是**启动页**的声明、引擎读的是**栈顶 Activity** 的声明。
         //       完整复盘见 [AppWhitelist] 类注释"记过案"。
+        // ★★ R2（2026-10-05）：**先把前台包记下来** —— 它是"按哪一档干活"的输入
+        //   （[mode]）。漏这一行的症状是"逐应用点名怎么设都没反应"，而且不报任何错。
+        //   ⚠️ 必须在下面所有分支之前：本函数有多个 return，写在中间就会漏。
+        fgPkg = info.pkg
+        // 状态里那一格也跟着更新（界面 / 诊断页读 [UiState.mode]）——
+        // 逐应用点名时它会显示"这个应用实际在用的档"，而不是全局档。
+        val appModeNow = AppPrefs.modeFor(info.pkg)
+        if (_ui.value.mode != appModeNow) _ui.update { it.copy(mode = appModeNow) }
+
         val form = AppPrefs.screenForm.value
         val whitelisted = AppPrefs.isWhitelisted(info.pkg)
-        // ② 实测不可控：⚠️ 带缓存，见 [uncontrollableRaw] —— 否则这里每次巡检都发一次
-        //    ContentResolver 查询。形态仍然要传：名单是按「包 + 那块屏」记的
-        //    （同一个应用可能内屏转得动、外屏转不动，而外屏的记录是删外屏增强之前留下的）。
-        val uncontrollable = Uncontrollable.isMarked(uncontrollableRaw(), info.pkg, form)
         // ★ 2026-09-29：把**本轮判据的三个输入**无条件上报（进不进门都报）。
         //   起因：用户报「外屏抖音弹了按钮但不能转」，而三格诊断字段此前**只在停手时**才写
         //   ⇒ 没停手时全空 ⇒ 读不到"引擎到底看到了什么"，只能靠日志措辞反推，
@@ -1099,15 +1169,9 @@ class AdaptiveEngine(
                 //   逐个补容易漏；而这里每 [FOREGROUND_POLL_MS] 一定会跑一次，
                 //   代价是"按钮自己倒计时消失后最多晚一个周期才报到"—— 够用。
                 hintAlive = overlayRef?.isShowing == true,
-                // ★ 不可控名单条数也在这里采样（它带 TTL 缓存，这里是"什么时候过期重读"的节拍器）
-                uncontrollableCount = Uncontrollable.sizeOf(uncontrollableRaw()),
             )
         }
-        val reason = when {
-            whitelisted -> StopReason.WHITELIST
-            uncontrollable -> StopReason.UNCONTROLLABLE
-            else -> null
-        }
+        val reason = if (whitelisted) StopReason.WHITELIST else null
         when (ForegroundGate.decide(info.pkg, reason != null)) {
             ForegroundGate.Decision.YIELD ->
                 enterForegroundGate(info, why, reason ?: StopReason.WHITELIST)
@@ -1124,8 +1188,8 @@ class AdaptiveEngine(
     /**
      * 停手：不开相机、不写方向；(按用户开关) 把系统自动旋转交还系统。
      *
-     * @param reason 两条豁免里命中的是哪一条。**只影响日志措辞与界面展示**
-     *   （排查时要能一眼分辨"是用户让它停的"还是"实测它转不动"），行为完全相同。
+     * @param reason 停手原因。**只影响日志措辞与界面展示**（行为完全相同）。
+     *   ⚠️ 2026-10-05 起只剩「白名单」一条 —— 原来的「实测不可控」已删除。
      */
     private fun enterForegroundGate(
         info: ForegroundProbe.Info,
@@ -1133,15 +1197,13 @@ class AdaptiveEngine(
         reason: ForegroundGate.StopReason,
     ) {
         val label = ForegroundGate.label(info.orientation)
-        // ★ 两条豁免共用同一套行为，但**日志必须能分辨**（这是排查时唯一的窗口）。
-        //   措辞刻意点出"是谁让它停的"：白名单 = **用户偏好**（用户能改）；
-        //   实测不可控 = **观测事实**（我们写过、屏幕没动），它不声称原因，只声称观测结果。
-        val hit = when (reason) {
-            ForegroundGate.StopReason.WHITELIST -> "在豁免名单里"
-            ForegroundGate.StopReason.UNCONTROLLABLE ->
-                "在${AppPrefs.screenForm.value.label}上实测旋转无效" +
-                    "（写过方向、两次读回屏幕都没变）"
-        }
+        // ★ 日志必须点出"是谁让它停的"：白名单 = **用户偏好**（用户自己能改）。
+        //   （原来还有第二种原因「实测不可控」= 观测事实，2026-10-05 已删除。）
+        // ★ 2026-10-05：停手原因现在**只有一条**（白名单）—— 原来的「实测不可控」
+        //   已按用户点名删除（转不动改成弹一次提示，不再停手）。
+        //   ⇒ 这里不再需要分支；但 [reason] 参数**保留**：它是"停手原因"的统一表达，
+        //     界面与日志都指着它（将来若真有第二种原因，往枚举里加一项即可）。
+        val hit = "在豁免名单里"
         if (fgGated) {
             // 已经停手了：只刷新展示（前台可能换成了另一个**也命中豁免**的应用）
             if (_ui.value.foregroundPkg != info.pkg ||
@@ -1289,7 +1351,10 @@ class AdaptiveEngine(
                 //   直接冲突（用户定死的值会被下一次方向变化 / 换屏覆盖回"当前方向"）。
                 //   现在方向槽位的写入者只有两个：用户点「默认方向」（App 借 root 直写）
                 //   与框架自己（用户手动转屏时同步）。⛔ 别把自动对齐加回来。
-                if (AppPrefs.mode.value == RotateMode.SYSTEM) continue
+                // ★ R2（2026-10-05）：判据从"全局档是不是 SYSTEM"换成 [AppPrefs.engagesAny] ——
+                //   全局档跟随系统、但有应用被点名成自适应时，这条巡检**必须继续跑**
+                //   （否则那些应用永远不会被取到档）。
+                if (!AppPrefs.engagesAny) continue
                 if (!_ui.value.sensorAvailable) continue
                 runCatching { refreshForegroundGate("巡检") }
                     .onFailure { Log.w(TAG, "前台门巡检异常（已忽略）", it) }
@@ -1498,7 +1563,7 @@ class AdaptiveEngine(
      */
     private fun maybeRetryForFreedCamera(cameraId: String) {
         if (!waitingForCamera) return
-        if (AppPrefs.mode.value != RotateMode.ADAPTIVE) {
+        if (mode() != RotateMode.ADAPTIVE) {
             waitingForCamera = false
             return
         }
@@ -1567,10 +1632,17 @@ class AdaptiveEngine(
     // ============================================================ 触发 → burst
 
     private fun onTriggered(reason: String) {
-        val mode = AppPrefs.mode.value
-        if (mode == RotateMode.SYSTEM) return
-
-        // ★★ 前台门（2026-09-28，判据已换成**应用白名单**）：**第一件事**就是看前台包在不在名单里。
+        // ★★★ R2（2026-10-05）：这里两件事的**顺序刻意与改造前相反**。
+        //
+        //   改造前是"先看全局档，是 SYSTEM 就直接返回"，因为档是全局的、不看前台也知道。
+        //   现在档**取决于前台是哪个应用**（[AppPrefs.modeFor]）⇒ 必须先读前台门
+        //   （它顺手把包名记进 [fgPkg]），再按那个包取档。
+        //
+        //   ⛔ 别把顺序倒回来：倒回来读到的是**上一次巡检留下的包名** ——
+        //     用户刚切到另一个应用时，会拿旧应用那一档去做决定，
+        //     症状是"某个应用偶尔不按我设的那一档走"，几乎不可能复现。
+        //
+        // ★★ 前台门（2026-09-28，判据 = **应用白名单**）：**第一件事**就是看前台包在不在名单里。
         //   在名单里 ⇒ 我们对它做的一切都是白做（用户明确说"这个应用不受本 app 控制"），
         //   而代价是实打实的 —— 每轮触发要开前摄 + 跑 8 帧 ML Kit（实测最密 32 次推理/秒），
         //   跟游戏抢 CPU/GPU，正是用户报的"打游戏断触"。所以这里直接掉头，连相机都不开。
@@ -1583,6 +1655,10 @@ class AdaptiveEngine(
             _ui.update { it.copy(skipGateCount = it.skipGateCount + 1) }
             return
         }
+
+        // ★★ 按**前台应用**取档（R2）。`SYSTEM` = 这个应用不归我们管 ⇒ 一个字都不做。
+        val mode = mode()
+        if (mode == RotateMode.SYSTEM) return
 
         // ★★ 半自动分流（2026-09-28）：**从此处开始与自适应完全分家**。
         //   半自动不需要相机、不需要人脸、不需要投票 —— 它只回答一个问题：
@@ -1690,9 +1766,9 @@ class AdaptiveEngine(
     /**
      * 取消待确认（主线程）。
      *
-     * ★ 三个调用点都必须在**收掉按钮**的同时调用它，否则会出现"按钮已经撤了、
+     * ★ **四个**调用点都必须在**收掉按钮**的同时调用它，否则会出现"按钮已经撤了、
      *   280ms 后又自己冒出来"的怪象：停手（[enterForegroundGate]）、引擎停止（[stop]）、
-     *   模式切走（[applyModeChange]）。
+     *   模式切走（[applyModeChange]）、**R1 从降级里恢复**（[noteAdaptiveEnv]）。
      */
     private fun cancelSemiSettle() {
         mainHandler.removeCallbacks(semiSettleRunnable)
@@ -1706,7 +1782,7 @@ class AdaptiveEngine(
     private fun confirmSemiHint(reason: String) {
         // ★ 延迟了 [SEMI_SETTLE_MS]，这期间模式可能已被切走（快捷开关 / 界面改档）。
         //   不看这一眼的话，切走后的 280ms 内还会弹一个按了不生效的按钮。
-        if (AppPrefs.mode.value != RotateMode.SEMI) return
+        if (mode() != RotateMode.SEMI) return
         // ★ 同理：这期间前台门可能已经合上（切到了白名单应用 / 桌面 / 声明式豁免的包）。
         //   [enterForegroundGate] 自己会 `cancelSemiSettle()`，这里是第二道保险。
         if (fgGated) return
@@ -1817,7 +1893,7 @@ class AdaptiveEngine(
         //   置 0（而不是 now）是让 `now - lastHintAt` 必然大于任何抑制期，语义上等于"无记忆"。
         semiHintAtMs = 0L
 
-        if (AppPrefs.mode.value != RotateMode.SEMI) return
+        if (mode() != RotateMode.SEMI) return
         // ★ 前台门停手期间点了按钮（2026-09-29 补，用户报的"按了按钮完全没反应"的兜底）。
         //   停手时我们已经把自动旋转交还系统（`accelerometer_rotation` 可能已是 1），
         //   这一写会被传感器在几毫秒内覆盖；而且下面那道 `takeoverOn` 闸会**静默** return。
@@ -1839,8 +1915,8 @@ class AdaptiveEngine(
         //   前台门交接的边界 / MIUI 自己 / 用户拨了系统自动旋转开关，都能把
         //   `ACCELEROMETER_ROTATION` 改回 1 而账仍停在 true。
         //   账陈旧时这一写就是**空操作**（传感器几毫秒内覆盖它），屏幕不动，于是
-        //   [scheduleUncontrollableReadback] 会把这笔"没动"**算到应用头上**，
-        //   把一个完全能转的应用永久记进"实测不可控"。
+        //   [scheduleSemiReadback] 会把这笔"没动"**算到应用头上**，
+        //   弹出一句没来由的「旋转失败」。
         //   ⇒ 账说没接管就补一次（幂等；它自己还会再闸一次前台门与授权）；
         //     补完仍不在手里就**别写、别测**，宁可什么都不做。
         if (!_ui.value.takeoverOn || readAutoRotate() != 0) engageTakeover()
@@ -1860,166 +1936,120 @@ class AdaptiveEngine(
         writeUserRotation(target)
         _ui.update { it.copy(semiTappedCount = it.semiTappedCount + 1, lastSemiTarget = target) }
         event("半自动：用户点击 ⇒ 旋转到 ${rotName(target)}（原 ${rotName(cur)}）")
-        // ★ A 方案（2026-09-29 用户拍板）：写完方向**排一次读回**，看屏幕到底动没动。
-        //   两次都没动 ⇒ 把这个「包 + 屏」记进"实测不可控"名单，此后对它静默停手（不弹按钮）。
-        //   这是全工程**唯一**一处"用观测结果反推判据"的地方，理由与代价见 [Uncontrollable]。
-        scheduleUncontrollableReadback(target)
+        // ★ 写完方向**排一次读回**，看屏幕到底动没动；两次都没动 ⇒ 弹一句「旋转失败」。
+        //   ⚠️ 2026-10-05 用户点名把结尾从"记进名单、此后永久停手"（原 A 方案 / `Uncontrollable`）
+        //     改成"只提示这一次" ⇒ 判据一个字没改，改的只是**结论的用途**。
+        scheduleSemiReadback(target)
     }
 
-    // ============================================================ ★ A 方案：实测不可控
+    // ============================================================ 半自动：转不动就提示
 
     /**
-     * 写完 `user_rotation` 之后**读回屏幕的真实旋转**；两次都没变就判定"这块屏上转不动"。
+     * 写完 `user_rotation` 之后**读回屏幕的真实旋转**；两次都没变 ⇒ 弹一句「旋转失败」。
      *
      * ============================ 为什么必须读两次 ============================
      * 写 `Settings.System.USER_ROTATION` 与屏幕真转过去之间隔着一次**显示重配**
-     * （WMS 重算配置 + 跑旋转动画），实测量级 250~400ms。只读一次的误判代价**极不对称**：
-     *   - 读太早 ⇒ 把"本来能转的应用"记成不可控 ⇒ **功能永久消失**，而且用户看到的
-     *     只有一句"实测转不动"，完全无从自查 —— 比不记还糟；
+     * （WMS 重算配置 + 跑旋转动画），实测量级 250~400ms。只读一次的代价是**误报**：
+     *   - 读太早 ⇒ 明明转过去了却弹「旋转失败」⇒ 用户不再信这句提示，
+     *     下次真失败他也不看 —— 那这句提示就白做了；
      *   - 多读一次 ⇒ 只多花 [SEMI_READBACK_MS]（半秒），而这段时间按钮早已收起，
      *     用户感知不到。
      * ⇒ 宁可读两次。任何一次读回**等于目标**就立刻收工（"屏幕真转过去了"是唯一判据），
-     *   连"系统接受了值但还没转"这类中间态都不会误记。
+     *   连"系统接受了值但还没转"这类中间态都不会误报。
      *
      * ★ 代次（[semiReadbackGen]）解决的是"用户在半秒内又点了另一个方向"：
      *   那会排一期新任务，旧任务醒来发现代次变了就自己作废 —— 否则旧任务会用
-     *   **过期的目标**去判"屏幕没动"，把一个能转的场景记成不可控。
+     *   **过期的目标**去判"屏幕没动"，弹出一句没来由的「旋转失败」。
      *
-     * ============ ⛔ 归因前置条件：方向盘必须真在我们手里（2026-09-29 补，真机事故）============
+     * ⚠️ **2026-10-05 用户点名改的只是"结论的用途"**：原来两次没动就把它记进
+     *   「实测不可控」名单、此后**永久静默停手**（A 方案，原 `Uncontrollable`）；
+     *   现在改成弹一次系统 Toast（[EngineText.rotationFailed]），**不落盘、不改后续行为**。
+     *   ⇒ 下面那两段归因前置条件**一条都没删** —— 误报虽然不再"永久"，但
+     *     一个不该出现的「旋转失败」同样是坏体验（用户会怀疑功能坏了），判据必须一样严。
+     *
+     * ============ ⛔ 归因前置条件一：方向盘必须真在我们手里（2026-09-29 补，真机事故）============
      * 用户报「**很多软件是能旋转的，但被标成实测不可旋转**，比如美团」。
      * 真机取证（本机，折叠屏内屏）：
      *
      * | 前台 | `ACCELEROMETER_ROTATION` | 写 `user_rotation=1` | 结果 |
      * |---|---|---|---|
-     * | 美团 | **1**（被外部打开） | 写进去了 | **屏幕纹丝不动** ⇒ 被记进名单 |
+     * | 美团 | **1**（被外部打开） | 写进去了 | **屏幕纹丝不动** |
      * | 美团 | 0（手动固定） | 写进去了 | **转得好好的** ⇒ 同一台机器！ |
      * | 设置 / 本应用 | 0 | 写进去了 | 都正常转 |
      *
-     * ⇒ 结论：**屏幕没动这件事，只有在方向盘确实握在我们手里时才能算到应用头上。**
+     * ⇒ 结论：**屏幕没动这件事，只有在方向盘确实握在我们手里时才能算数。**
      *   自动旋转一旦是开的，`USER_ROTATION` 就是一张废纸（传感器几毫秒内覆盖它），
      *   屏幕当然不动 —— 这跟"这个应用能不能转"半点关系都没有。
-     *   漏了这个前提，判据就从"实测"退化成了"猜"，而且猜错是**永久性**的
-     *   （落盘 + 此后静默停手），正是 [Uncontrollable] 反复强调要避免的那种失败模式。
-     *   ⇒ 两次读回前都查一次 `ACCELEROMETER_ROTATION`，不满足就**放弃这一轮判定**、绝不落盘。
+     *   ⇒ 两次读回前都查一次 `ACCELEROMETER_ROTATION`，不满足就**放弃这一轮**、绝不弹提示。
      *
-     * ============ ⛔ 归因前置条件之二：我们写下去的那个值得还在（2026-09-29 修正）============
+     * ============ ⛔ 归因前置条件二：我们写下去的那个值得还在（2026-09-29 修正）============
      * 判据统一走 [currentDeviceRotation]（= "屏幕当前展示的方向"），与写入端 [writeUserRotation]
      * **用同一套换算**。本机偏置恒 0，两边都是恒等 —— 但"读的一侧和写的一侧必须同源"这条
      * 纪律要留着：曾经一端不换算、另一端也不换算，**两个错互相抵消**，内屏明明是反的却
      * 一路报"转成功了"（见 [PanelOrientation] 类注释）。
      */
-    private fun scheduleUncontrollableReadback(target: Int) {
+    private fun scheduleSemiReadback(target: Int) {
         val gen = ++semiReadbackGen
-        // 判据要落到「包 + 形态」上，两个都得有：包名取不到（前台变了 / 读不到）就**不记**
-        // —— 与全工程"读不到就不下结论"一致，宁可少记一条，不许记错一条。
+        // 判据要落到「包 + 形态」上，两个都得有：包名取不到（前台变了 / 读不到）就**不提示**
+        // —— 与全工程"读不到就不下结论"一致，宁可少提示一次，不许乱提示一次。
         val pkg = _ui.value.foregroundPkg.ifEmpty { null } ?: return
         val form = AppPrefs.screenForm.value
-        // 已经在名单里 ⇒ 不必再测（省两次 IPC，也让日志干净）
-        if (Uncontrollable.isMarked(uncontrollableRaw(), pkg, form)) return
         mainHandler.postDelayed({
             if (gen != semiReadbackGen) return@postDelayed
-            // ★★ 归因前置条件（2026-09-29 补，这是本 bug 的另一半根因）：
-            //   "屏幕没动"这件事**只有在方向盘确实握在我们手里时**才能算到应用头上。
+            // ★★ 归因前置条件一（2026-09-29 补，这是那个 bug 的另一半根因）：
+            //   "屏幕没动"这件事**只有在方向盘确实握在我们手里时**才能算数。
             //   若此刻 `ACCELEROMETER_ROTATION != 0`，屏幕不动的原因是**传感器在覆盖我们的
             //   写入**，与这个应用能不能转毫无关系 —— 真机实证：美团在 accel=1 时写
             //   `user_rotation` 完全不生效（把 accel 固定成 0 后同一台机器上它转得好好的）。
-            //   ⇒ 不满足就**放弃这一轮判定**，绝不落盘（误记的代价是"功能永久消失"）。
+            //   ⇒ 不满足就**放弃这一轮**，绝不提示。
             if (readAutoRotate() != 0) {
-                event("实测不可控：放弃判定（自动旋转被打开了，屏幕没动能归因给应用以外的东西）")
+                event("旋转提示：放弃判定（自动旋转被打开了，屏幕没动能归因给应用以外的东西）")
                 return@postDelayed
             }
-        // ★ `wrotePanel` 是"我们写下去的那个数"，判"屏幕没动"之前先确认**它还在**
-        //   （被别的写入覆盖 ⇒ 屏幕不动的原因不是"这个应用转不了"，同样不能归因）。
-        //   ⚠️ 读取端与写入端**必须用同一个判据空间**（都用换算后的量）：曾经一端不换算、
-        //      另一端也不换算，两个错正好抵消 ⇒ 内屏明明是反的却一路报"转成功了"。
-        //      本机偏置恒 0，两边都是恒等；但别再让"读的一侧"和"写的一侧"各写一套。
-        val wrotePanel = deviceToPanel(target)
-        if (currentDeviceRotation() == target) return@postDelayed
-        // 第一次没变 —— 再给一次机会（见 KDoc 的"读两次"）
-        mainHandler.postDelayed({
-            if (gen != semiReadbackGen) return@postDelayed
-            // 同一个前提再查一次：这半秒里方向盘可能又被交还了
-            if (readAutoRotate() != 0) return@postDelayed
-            if (readUserRotation() != wrotePanel) {
-                event("实测不可控：放弃判定（我们写下的 $wrotePanel 已被改写，屏幕没动不能算到应用头上）")
-                return@postDelayed
-            }
+            // ★ `wrotePanel` 是"我们写下去的那个数"，判"屏幕没动"之前先确认**它还在**
+            //   （被别的写入覆盖 ⇒ 屏幕不动的原因不是"这个应用转不了"，同样不能归因）。
+            //   ⚠️ 读取端与写入端**必须用同一个判据空间**（都用换算后的量）：
+            //      曾经一端不换算、另一端也不换算，两个错正好抵消 ⇒ 内屏明明是反的
+            //      却一路报"转成功了"。本机偏置恒 0，两边都是恒等；
+            //      但别再让"读的一侧"和"写的一侧"各写一套。
+            val wrotePanel = deviceToPanel(target)
             if (currentDeviceRotation() == target) return@postDelayed
-            markUncontrollable(pkg, form, target)
-        }, SEMI_READBACK_MS)
+            // 第一次没变 —— 再给一次机会（见 KDoc 的"读两次"）
+            mainHandler.postDelayed({
+                if (gen != semiReadbackGen) return@postDelayed
+                // 同一个前提再查一次：这半秒里方向盘可能又被交还了
+                if (readAutoRotate() != 0) return@postDelayed
+                if (readUserRotation() != wrotePanel) {
+                    event("旋转提示：放弃判定（我们写下的 $wrotePanel 已被改写，屏幕没动不能算到应用头上）")
+                    return@postDelayed
+                }
+                if (currentDeviceRotation() == target) return@postDelayed
+                notifyRotateFailed(pkg, form, target)
+            }, SEMI_READBACK_MS)
         }, SEMI_READBACK_MS)
     }
 
     /**
-     * 记一笔「这个包 + 这块屏实测转不动」，并立刻重判前台门（当场停手）。
+     * 两次读回屏幕都没动 ⇒ 弹一句「旋转失败」。
      *
-     * ★ 幂等由 [Uncontrollable.withMarked] 保证（已存在则原样返回），
-     *   所以同一个应用反复触发也不会把键越写越长。
+     * ⚠️ **只提示这一次**：不落盘、不刷新前台门、不改变后续任何行为 ——
+     *   用户再点、再失败，就该再看到这句（去重只交给 [AppToast] 那 2 秒）。
+     *   ⛔ 别在这里加"记一笔、以后不提示"的逻辑 —— 那正是 2026-10-05 用户点名删掉的那个功能。
+     *
+     * ★ 为什么由**引擎**弹：这一刻用户正看着**别的应用**（他是在那个应用里点的悬浮按钮），
+     *   而 Android 10+ 起**后台普通应用弹 Toast 会被系统静默丢弃**（见 [AppToast] ① 的实测）；
+     *   引擎跑在 SystemUI 系统进程里 ⇒ 不受那条限制。文案按系统语言选，见 [EngineText.rotationFailed]。
+     *
+     * ★ 参数 [pkg] / [form] / [target] **只用来写日志**（提示文案是固定的一句）
+     *   —— 保留它们是为了让 `✗ 旋转失败` 这条记录能直接看出"是哪个应用、哪块屏、想去哪个方向"。
      */
-    private fun markUncontrollable(pkg: String, form: ScreenForm, target: Int) {
-        val next = Uncontrollable.withMarked(uncontrollableRaw(), pkg, form)
-        val ok = PrefsBridge.writeString(context.contentResolver, Uncontrollable.KEY, next)
-        if (ok) {
-            // ★ 自己写的自己知道 —— **立刻**刷缓存，别等 TTL 到期。
-            //   否则接下来 [UNCONTROLLABLE_TTL_MS] 内这条判据还是"没记上"，
-            //   用户会看到按钮又弹了一次（正是要修的那个现象）。
-            uncontrollableCache = next
-            uncontrollableCacheAt = SystemClock.elapsedRealtime()
-        }
+    private fun notifyRotateFailed(pkg: String, form: ScreenForm, target: Int) {
+        // ★ 不必再包 runCatching —— [AppToast] 自己吞并记 `HyperPlusToast` 标签（它的类注释有约）。
+        AppToast.show(context, EngineText.rotationFailed(context))
         event(
             "半自动：$pkg 在${form.label}上写了 ${rotName(target)} 但屏幕没有变化（两次读回都没变）" +
-                " ⇒ 记入实测不可控名单，此后在${form.label}上不再弹按钮" +
-                if (ok) "" else "（⚠️ 写入 Settings 失败，本条只在内存里有效）"
+                " ⇒ 已提示「旋转失败」（不记录、不改变后续行为）"
         )
-        // 当场重判：若当前前台就是这个包，这一步会立刻进门停手（并撤掉可能还挂着的按钮）
-        refreshForegroundGate("实测不可控")
-    }
-
-    /**
-     * 读不可控名单（带 TTL 缓存，见 [uncontrollableCache]）。
-     *
-     * ★ 读失败时**返回上一次的缓存**、绝不返回 null/空：与全工程"读不到就不下结论"
-     *   那条纪律一致 —— 最坏情况是"晚一轮才停手"，而返回空会让**已经记上的豁免凭空消失**、
-     *   按钮又冒出来（用户会以为记录没生效）。
-     */
-    private fun uncontrollableRaw(): String {
-        val now = SystemClock.elapsedRealtime()
-        if (now - uncontrollableCacheAt < UNCONTROLLABLE_TTL_MS) return uncontrollableCache
-        PrefsBridge.readString(context.contentResolver, Uncontrollable.KEY)
-            ?.let { uncontrollableCache = it }
-        uncontrollableCacheAt = now
-        return uncontrollableCache
-    }
-
-    /**
-     * 处理 App 那边点"清除实测记录"的请求。
-     *
-     * ★ 为什么绕一圈：**App 没有 `WRITE_SETTINGS`**（清单里没有这个权限），删不了
-     *   `Settings.System` 里的键。所以 App 只写自己 prefs 里的一个新时间戳，
-     *   引擎读到"值变了"代为删除。完整理由见 [PrefsBridge.UNCONTROLLABLE_CLEAR]。
-     *
-     * ⚠️ ★ **首次只记账、不动作**：这个请求值是**长期停在**最后一个时间戳上的
-     *   （引擎处理完不改它 —— 也改不了），所以引擎每次冷启动 `collect` 拿到它时，
-     *   那只是"历史上有人点过清除"，**不是**"现在要清"。
-     *   少写这一道判断，引擎每重启一次就会把用户攒下的记录清空一次。
-     *
-     * ★★ 判据本体抽到了 [shouldRunClear]（纯函数、有单测）—— 这是**修 bug 修出来的**：
-     *   第一版把"有没有读过"编码成"`seen` 是不是空串"，结果"读到的值确实是空"与
-     *   "还没读过"撞成同一个值，冷启动后的第一次真实清除请求被静默丢掉。
-     *   真机复现过（见 [uncontrollableClearPrimed]）。
-     */
-    private fun handleUncontrollableClearRequest(req: String) {
-        val run = shouldRunClear(uncontrollableClearPrimed, uncontrollableClearSeen, req)
-        // ★ 无论跑不跑，都要先把"认过路"立起来（理由见 [uncontrollableClearPrimed]）——
-        //   否则冷启动那次读数会被反复当成"第一次"，用户点的第一下永远丢。
-        uncontrollableClearPrimed = true
-        if (!run) return
-        uncontrollableClearSeen = req
-        val had = Uncontrollable.sizeOf(uncontrollableRaw())
-        PrefsBridge.delete(context.contentResolver, Uncontrollable.KEY)
-        uncontrollableCache = ""
-        uncontrollableCacheAt = SystemClock.elapsedRealtime()
-        event("半自动：按你的请求清除了实测不可控名单（原有 $had 条）⇒ 相关应用恢复弹按钮")
     }
 
     private fun startBurst() {
@@ -2033,6 +2063,9 @@ class AdaptiveEngine(
         synchronized(burstLock) {
             bursting = true
             burstFrameCount = 0
+            // ★ R1：与帧计数同生命周期 —— 不过这一句会让上一轮的"见到过人脸"
+            //   冒充这一轮的结论，降级就永远判不出来。
+            burstHadUsableFace = false
             burstStartedAt = SystemClock.elapsedRealtime()
             seq = ++burstSeq
             alreadyHolding = selfHolding
@@ -2166,7 +2199,7 @@ class AdaptiveEngine(
      * 电量代价可控：补试只在**触发之后**发生，且最多 2 次（≈1.4 秒），不会变成轮询。
      */
     private fun scheduleRetry(why: String) {
-        if (AppPrefs.mode.value != RotateMode.ADAPTIVE) return
+        if (mode() != RotateMode.ADAPTIVE) return
         if (retryLeft <= 0) {
             event("补试额度已用完，等下一次触发（原因：$why）")
             return
@@ -2174,7 +2207,7 @@ class AdaptiveEngine(
         event("补试：${RETRY_DELAY_MS}ms 后再采一次（原因：$why）")
         scope.launch {
             delay(RETRY_DELAY_MS)
-            if (AppPrefs.mode.value != RotateMode.ADAPTIVE) return@launch
+            if (mode() != RotateMode.ADAPTIVE) return@launch
             if (bursting) return@launch
             // 补试同样要过 G1：此刻相机若仍被别人占着，就老实让步，别硬抢
             // ★ 而且**不扣额度** —— 否则"被占用而放弃"会把额度白烧掉，
@@ -2378,6 +2411,13 @@ class AdaptiveEngine(
                 //   只在出帧时记，避免把 0 帧的坏 id 写进偏好、下次启动先试一个坏的。
                 noteFrontIdSuccess()
             }
+            // ★★★ R1（2026-10-05）：环境不可用的降级记账。
+            //   ⚠️ 位置是**刻意选的**：放在 `frames > 0` 之后 —— 那个分支刚确认了
+            //     "相机是通的、确实出帧了"，所以这里若仍然"一帧可用人脸都没有"，
+            //     就**只可能**是环境问题（暗光 / 没对着镜头 / 脸被挡），
+            //     而不是相机故障（那种走 `gaveUp`，根本不在本分支里）——
+            //     把相机故障记到"环境"头上会让降级掩盖真正的故障。
+            noteAdaptiveEnv(hadFace = burstHadUsableFace, frames = frames)
         }
 
         // G4：省电优先下**不再立刻关**，而是进入 [CAMERA_KEEP_WARM_MS] 保温期；
@@ -2625,28 +2665,14 @@ class AdaptiveEngine(
     ) {
         val s = _ui.value
         if (!s.takeoverOn) return
-        // ★★★ 2026-10-02 撤销「预览期间不写方向」这道闸。**别再把它加回来。**
+        // ★★★ 历史教训（2026-10-01 加闸 / 10-02 撤闸；2026-10-04 那个功能整体删除）。
+        //   ⛔ **别再加这类「诊断页开着就不写方向」的闸。**
         //
-        //   上一版（10-01）在这里 `if (previewHold) return`，动机是"一个仪表不该顺手把屏幕
-        //   转掉"。真机证实这个动机**换来了一个更坏的后果**：打开「方向校准」看角度时，
-        //   屏幕方向被**冻在一个陈旧值**上，用户看到的是假现场。
-        //
-        //   ============================ 铁证（10-02 01:03，用户当场报「屏幕朝左躺」）============================
-        //   ```
-        //   01:03:45.350  实时角度：停止读数（界面已关闭）
-        //   01:03:45.377  接管写入 user_rotation = 3（目标方向 横屏（设备顺时针转 90°））
-        //   01:03:46.584  锚点采样（当前 内屏，实测 608dp）：面板 2 → 3
-        //   ```
-        //   ⇒ 引擎**从头到尾**算的都是 3（`rot=3`、`grav=3`、投票 6/6 全中），
-        //     **唯一没做的就是把 3 写下去** —— 因为它被这道闸挡着。预览一停，27ms 内就修好了。
-        //   ⇒ 症状正是用户描述的「姿态是对的（顶边朝右，260°），内容却朝左躺」：
-        //     面板停在 2（倒竖屏），内容相对人脸偏 −90°，顶部指向左侧。
-        //
-        //   ⚠️ 还有个更隐蔽的副作用：**半自动模式下引擎本来一次 burst 都不发**
-        //     （见 [onSemiTriggered] 上面的分流注释），而预览为了取人脸帧会发 burst ⇒
-        //     burst 收尾照样走到这里。于是"预览开着"= 半自动被短暂变成自动，
-        //     "预览一停"= 攒下的那次决定突然落盘、屏幕猛地转一下。两头的表现都不像用户点的那个档。
-        //   ⇒ 修法就是**让预览回到纯仪器**：它只读摄像头，方向该转就转，与没开预览时一致。
+        //   当时的动机是「一个仪表不该顺手把屏幕转掉」。真机证伪：打开那一页看读数时，
+        //   屏幕被**冻在陈旧值**上 —— 用户报的「屏幕朝左躺」，其实引擎算的一直是 3，
+        //   只是被这道闸压着没写，闸一撤 27ms 内就对了。
+        //   ⇒ 铁的纪律：**仪表不准改变被测量的东西** —— 任何只读/诊断类功能
+        //     都不许插进「写方向」这条链。
         // ★ 前台门停手期间**一律不写方向**（2026-09-28）：前台应用自己管朝向时，
         //   我们这一写要么白写、要么真的把它的屏幕转掉并打断进行中的手势。
         //   门控期间理论上不会有 burst，但这里是**最后一道闸**，必须自己兜住 ——
@@ -2670,11 +2696,11 @@ class AdaptiveEngine(
         //   唯一该写盘的是那次点击。这个函数是"看到帧就落定"的自适应路径 ——
         //   正常半自动下**一次 burst 都不发**（见 [onSemiTriggered] 上面的分流注释），
         //   所以它本来压根到不了这里，看起来加不加都一样。
-        //   ⚠️ 但**实时角度预览会发 burst**（它要人脸帧）⇒ 没有这道闸的话，
-        //   "打开方向校准页"这个诊断动作会把半自动**悄悄变成自动**：看着读数的同时
-        //   屏幕自己转，退出时又攒下一次性决定突然落盘。两头的表现都不是用户选的那个档。
-        //   ⇒ 预览必须是纯仪器：不改被测量的东西。
-        if (AppPrefs.mode.value == RotateMode.SEMI) return
+        //   ⚠️ 任何**会额外发 burst 的只读功能**都要先想清这一点：没有这道闸，一个
+        //   「看一眼角度」的诊断动作就会把半自动悄悄变成自动 —— 看着读数的同时屏幕自己转，
+        //   退出时又攒下一次性决定突然落盘。两头的表现都不是用户选的那个档。
+        //   ⇒ 只读功能必须是纯仪器：不改被测量的东西。
+        if (mode() == RotateMode.SEMI) return
         // ★ 定论来源有两个，但**每帧**只认第一个：
         //   ① 本轮投票已达多数（[voteConfident]）—— 立刻生效，不再等状态机的保持期；
         //   ② 状态机稳定（STABLE）—— 仅在 [allowDeciderFallback]（= burst 收尾）时可用。
@@ -2862,7 +2888,7 @@ class AdaptiveEngine(
         //   `ACCELEROMETER_ROTATION` 改回 1，而账还停在 true。
         //   账一旦陈旧，"接管"就成了空操作：写下去的 `user_rotation` 会被传感器在几毫秒内
         //   覆盖 ⇒ 屏幕不动 ⇒ 半自动那条**读回**会把这笔"没动"算到应用头上（见
-        //   [scheduleUncontrollableReadback]）。
+        //   [scheduleSemiReadback]）。
         //   ⇒ 只有"账说是、且事实也是"才敢短路；否则老老实实再接管一次（幂等）。
         if (_ui.value.takeoverOn && readAutoRotate() == 0) return
         // ★★ 前台门优先：当前前台应用在白名单里 ⇒ **不接管**（2026-09-29 修）。
@@ -2882,7 +2908,16 @@ class AdaptiveEngine(
         }
         if (!Settings.System.canWrite(context)) {
             _ui.update { it.copy(writeSettingsGranted = false) }
-            event("⚠️ 缺少 WRITE_SETTINGS 授权 → 尚未接管（请在页面上点授权）")
+            // ⚠️ 这条文案 2026-10-05 改过。旧文案是「请在页面上点授权」—— 那个页面**不存在**：
+            //   本应用的清单刻意**不声明** `WRITE_SETTINGS`（见 `AndroidManifest.xml` 那段说明），
+            //   系统的「修改系统设置」列表里因此**找不到 HyperPlus** ⇒ 用户照做只会白跑一趟。
+            //   何况 `context` 是 **SystemUI** 的，它自带的 `WRITE_SETTINGS` 是 SYSTEM_FIXED 授予
+            //   （实测 `dumpsys package com.android.systemui` ⇒ `granted=true`）⇒ 正常环境
+            //   **这一支永不触发**。走到了就是异常，如实说是异常、并把人指向真能看的地方。
+            event(
+                "⚠️ 引擎进程拿不到 WRITE_SETTINGS —— 这是异常（系统界面本应自带该权限）" +
+                    " ⇒ 尚未接管。本应用没有这个权限、也无处可授权；请到「设置 → 权限管理」核对",
+            )
             return
         }
         val cur = readAutoRotate()
@@ -2977,9 +3012,6 @@ class AdaptiveEngine(
         lastAppliedRot = -1
         _ui.update { it.copy(takeoverOn = false) }
     }
-
-    /** 供 UI 的「授权后重试接管」按钮调用 */
-    fun retryTakeover() = engageTakeover()
 
     /**
      * ★ 孤儿接管恢复：进程被强杀时 `takeoverOn` 的内存态没了，
@@ -3114,7 +3146,7 @@ class AdaptiveEngine(
             //   App 的开关读的是自己那份配置，宿主单方面改镜像会让两边不一致 ——
             //   用户的体感就是"开关关不掉 / 打不开"。标定本身并不需要接管
             //   （它只采样算 sign/offset），启用与否交给开关，这里只留一句解释。
-            if (!AppPrefs.mode.value.usesCamera) {
+            if (!mode().usesCamera) {
                 event("提示：当前不是「自适应旋转」，标定结果会先存下来，切到自适应后立刻生效")
             }
 
@@ -3151,162 +3183,6 @@ class AdaptiveEngine(
 
     /** 当前缓冲里的有效人脸样本数（标定用） */
     private fun calibSampleCount(): Int = synchronized(recentRolls) { recentRolls.size }
-
-    // ============================================================ 实时角度预览
-    //
-    // ★★ 2026-10-01 新增。用户原话：
-    //   「现在每次旋转的方向都是对的，不要再改变，但从外屏展开到内屏的默认方向不对，
-    //     **在方向校准里面加一个实时的角度显示，我告诉你正确方向**」。
-    //
-    // 这一节做的就是那个"显示"：引擎开着前摄连续采帧，把**当前人脸相对屏幕默认方向的
-    // 角度**（0° = 手机竖屏正对自己）以 4Hz 写到 Settings，界面那一页画成数字 + 角度盘。
-    //
-    // ★ 与"触发式 burst"的关系：日常是"设备动了才采一轮 8 帧"（省电），
-    //   而这里需要一个**持续**读数 ⇒ 循环里不断补 startBurst。相机在两次 burst 之间
-    //   本来就有保温期（见 [scheduleCameraRelease]），所以并不会反复冷启动。
-    //
-    // ⚠️ 三条纪律：
-    //   ① **不改动旋转的判定** —— 预览只是"多跑几轮采帧"，方向该按哪条路写还按哪条路写。
-    //      ⛔ 曾经这里是"预览期间一律不写方向"（`previewHold` 当第一道闸），10-02 撤掉了：
-    //      后果是**屏幕被冻在陈旧值上**，用户看到的"屏幕朝左躺"就是它冻出来的（证据见
-    //      [applyRotationIfNeeded] 顶部那段），而且它会让半自动档在预览期间"偷偷变成自动"。
-    //   ② **绝不常驻** —— [PREVIEW_MAX_MS] 到点自停（界面崩了 / 用户按 Home 都不会漏关）；
-    //   ③ **不跨启动存活** —— 引擎侧首次重放只记账（见 start() 里那段），
-    //      App 侧读盘时强制复位（见 `AppPrefs.init`）。
-
-    /**
-     * 开/关实时角度预览。**幂等**（同一个值重复来不会重启循环）。
-     *
-     * @param on true = 界面正在看这一页；false = 界面已离开（或超时自停）
-     */
-    fun setAnglePreview(on: Boolean) {
-        if (!on) {
-            stopAnglePreview("界面已关闭")
-            return
-        }
-        if (previewHold) return
-        previewHold = true
-        previewUntil = SystemClock.elapsedRealtime() + PREVIEW_MAX_MS
-        event("实时角度：开始读数（最长 ${PREVIEW_MAX_MS / 1000} 秒；方向照常，不因预览改变行为）")
-        previewJob = scope.launch {
-            // ★ 第一次进来立刻报一次，别让界面先空着等一个 tick。
-            publishLiveAngle()
-            var tick = 0
-            // 用户还在看吗？—— 悲观初始值无所谓，第 0 个 tick 就会采一次。
-            var viewerHere = true
-            while (isActive && SystemClock.elapsedRealtime() < previewUntil) {
-                // 相机被释放过（省电保温期结束 / 被别的应用踢掉）就补一轮。
-                // 注意 startBurst 内部已经处理"相机已常驻 ⇒ 直接等帧"，这里不必区分。
-                if (!bursting) runCatching { startBurst() }
-                publishLiveAngle()
-                // ★★ 续期（2026-10-02）：界面还停在前台 ⇒ 用户还在看，把到点时间往后推。
-                //
-                // ⚠️ 判据是**直接读前台包名**，不是 `_ui.value.foregroundPkg`：
-                //   后者由 [refreshForegroundGate] 填，而那个函数在"门控总开关关掉"时会
-                //   **提前 return、一个字都不更新** ⇒ 这时它的值是**上次的残留**，
-                //   拿它判"用户还在不在"会永远得到"在"（症状＝相机被无限续期）。
-                //
-                // ⚠️ 读不到（null）时**按"还在"处理** —— 与 [ForegroundGate] 同一条纪律：
-                //   代价不对称，宁可多开一会儿相机，也不要因为读不到就掐掉用户正在看的东西。
-                //   现实里"用户按 Home"这条最需要兜住的路径，前台包名是读得到的。
-                if (tick % PREVIEW_FG_CHECK_TICKS == 0) {
-                    val pkg = runCatching { fgProbe.read()?.pkg }.getOrNull()
-                    viewerHere = pkg == null || pkg == SELF_PKG
-                }
-                tick++
-                if (viewerHere) {
-                    previewUntil = SystemClock.elapsedRealtime() + PREVIEW_MAX_MS
-                }
-                delay(PREVIEW_TICK_MS)
-            }
-            // ★ 超时自停：界面崩溃 / 用户按 Home 时 onDispose 不会执行，
-            //   唯一兜住"相机一直被我们占着"的就是这条。
-            if (previewHold) {
-                stopAnglePreview("超过 ${PREVIEW_MAX_MS / 1000} 秒未收到界面续期")
-                // ⚠️ 顺手把界面那份开关也复位 —— 否则界面回到前台后会显示"正在读数"
-                //   却永远等不到数据，而用户完全不知道发生了什么。
-                runCatching { AppPrefs.setAnglePreview(false) }
-            }
-        }
-    }
-
-    /** 停预览。**不主动关相机** —— 让最后一次 burst 自然收尾，保温期到了自己会释放。 */
-    private fun stopAnglePreview(why: String) {
-        if (!previewHold && previewJob == null) return
-        previewHold = false
-        previewJob?.cancel()
-        previewJob = null
-        event("实时角度：停止读数（$why）")
-    }
-
-    /**
-     * 把**此刻**的角度写进 `hyperplus_bus_live_angle`（格式见 [PrefsBridge.LIVE_ANGLE]）。
-     *
-     * ★ 角度取的是**归一化角**（[OrientationDecider.angleOf] 的输出，0..360）——
-     *   它的 0° 定义就是"人脸正立 + 手机竖屏正对自己"，也就是用户要的
-     *   **「以屏幕默认方向为 0 度基准」**。原始 roll 一并报出去，方便对照标定前后的差别。
-     *
-     * ⚠️ 这个写**绕过了状态总线**（那条是 2 秒节流的慢变量通道），是刻意的：
-     *   4Hz 的逐帧量混进总线会让整串状态每次都变，把「最近事件」冲掉。
-     *   它只写一个专用键，App 那页按需读。
-     *
-     * ★★ 2026-10-03：加了**"内容没变就别写"**的闸（见 [lastLiveAngleBody]）。
-     *   原来每 250ms 无条件写一次，而那行末尾带时间戳 ⇒ 永远判不出"没变" ⇒
-     *   一次写入都省不掉。现在：角度等字段变了照旧 4Hz；**没变时降到 1 秒一次**。
-     *   ⚠️ 时间戳**必须继续带**（App 靠它判新鲜度），所以"降频"只能这么做，
-     *     不能靠"值相同就不写" —— 那会让界面把一条正常读数判成"已停止"。
-     */
-    private fun publishLiveAngle() {
-        val s = _ui.value
-        val norm = decider.lastNormalized
-        // ① 先拼"内容部分"（**不含时间戳**）—— 判"变了没"只能看这一段
-        val body = buildString {
-            // 归一化角（0 = **当前这块屏**的默认方向）；没脸时为空串（**不写 0** —— 0 是合法角度）
-            append(fmt(panelPhase(norm))); append('|')
-            append(fmt(s.eulerZ)); append('|')
-            append(s.rotation); append('|')
-            append(s.displayRotation); append('|')
-            append(AppPrefs.screenForm.value.name)
-        }
-        val now = SystemClock.elapsedRealtime()
-        if (body == lastLiveAngleBody && now - lastLiveAngleAtMs < LIVE_ANGLE_IDLE_MS) return
-        lastLiveAngleBody = body
-        lastLiveAngleAtMs = now
-        // ② 真正要写的那行 = 内容 + 时间戳（App 侧按 6 段解析，见 [LiveAngle.read]）
-        val line = body + "|" + now
-        runCatching {
-            PrefsBridge.writeString(context.contentResolver, PrefsBridge.LIVE_ANGLE, line)
-        }
-    }
-
-    /**
-     * 把「人脸相对**设备**的倾角」换成「人脸相对**当前这块屏**的默认方向」（显示层专用）。
-     *
-     * ============================ ★★ 这一层为什么必须存在（2026-10-02）============================
-     * 用户在这个功能上点名要的规格是「**实时角度以屏幕默认方向为 0 度基准**」。
-     * 而 [OrientationDecider] 的 0° 锚在**设备自然方向**（前摄 `SENSOR_ORIENTATION` 那条硬件常量），
-     * 两块屏**不是**同一个方向 —— 本机实测：内屏 `installOrientation = ROTATION_180`、外屏 `= 0`
-     * （`dumpsys display` 的 `mStaticDisplayInfo`，2026-10-02 实读）。
-     *
-     * 于是展开到内屏后，用户按"内屏正对自己"拿手机时读数一直是 **180°**：他报的就是这个数，
-     * 而引擎侧**人脸扇区、重力扇区、系统方向三者同时为 2** —— 说明这不是测量错，
-     * 是**基准选错了**（锚在设备上，而他要的是锚在屏上）。
-     *
-     * ⚠️⚠️ **⛔ 绝不许拿这个相位去改 `USER_ROTATION` 的写值路径！**
-     *   两者是不同的层，混起来就是 2026-09-28 那个已被真机证伪的 bug（"每次旋转方向都相反"）：
-     *     · **写值层**（`PanelOrientation.installOffset`）：扇区 → `USER_ROTATION` **恒等映射**
-     *       （实测：握姿扇区 2 时系统值就是 2）。这一层**不许有偏置**。
-     *     · **显示层**（本函数）：读数 → 给用户看的度数。这一层**必须有** 180° 相位。
-     *   判据：**看到"两块屏要写不同的值"就是 bug；看到"两块屏的读数基准不同"才是本层。**
-     *
-     * @param norm [OrientationDecider.lastNormalized]，NaN = 没脸（**原样返回，不换算**）
-     */
-    private fun panelPhase(norm: Float): Float {
-        if (!norm.isFinite()) return norm
-        val phase = if (AppPrefs.screenForm.value == ScreenForm.INNER) 180f else 0f
-        if (phase == 0f) return norm
-        return (norm + phase) % 360f
-    }
 
     // ============================================================ 相机初始化
 
@@ -3349,6 +3225,12 @@ class AdaptiveEngine(
         lastFrameAtMs = SystemClock.elapsedRealtime()
 
         val roll = pickRoll(frame)
+        // ★★★ R1（2026-10-05）：本轮"见到过可用人脸"的唯一标记。
+        //   ⚠️ 判据**复用上面这个 `roll`**（`pickRoll` 的答案），不另立标准 ——
+        //     否则会出现"投票认为有脸、R1 认为没脸"这种两套口径打架的局面。
+        //   ⚠️ 带 `bursting` 守卫，理由与上面 [burstFrameCount] 那条逐字相同：
+        //     相机保温期仍有帧在来，那不算"这一轮的观测"。
+        if (bursting && roll != null) burstHadUsableFace = true
         val r = decider.update(roll, frame.atMs, frame.faceCount)
 
         // ★ 每轮多帧投票：这一帧投给「它自己看到的那个方向」。
@@ -3583,13 +3465,6 @@ class AdaptiveEngine(
         event("相机权限已授予")
     }
 
-    /** 从系统「修改系统设置」授权页回来，刷新授权状态并补一次接管 */
-    fun refreshWriteSettingsGrant() {
-        val granted = Settings.System.canWrite(context)
-        _ui.update { it.copy(writeSettingsGranted = granted) }
-        if (granted && AppPrefs.mode.value.engages) engageTakeover()
-    }
-
     // ============================================================ 内外屏形态（模式解耦的引擎半边）
 
     /** 是否已注册配置监听。`start()` 可能被反复调用，重复注册会收到 N 份回调 */
@@ -3760,7 +3635,11 @@ class AdaptiveEngine(
         //   换屏这一瞬间 WMS 的窗口尺寸可能还没切过来，现量会拿到**旧屏**的值。
         val offset = PanelOrientation.offsetFor(form)
         _ui.update { it.copy(panelOffset = offset) }
-        if (!AppPrefs.mode.value.engages) return
+        // ★ R2（2026-10-05）：这一闸同样换成 [AppPrefs.engagesAny] —— 换屏方向是**整块屏**的
+        //   事，与"前台是哪个应用"无关（[mode] 在这里也读不到有意义的前台包）。
+        //   漏换的症状：全局档跟随系统、但某个应用被点名成自适应时，
+        //   展开 / 合上会让那个应用的方向记忆丢掉（这一段正是"搬运"它的地方）。
+        if (!AppPrefs.engagesAny) return
 
         // ★ 白名单停手期间**不搬**（2026-09-29 补）。
         //   两个理由，缺一个都够：
@@ -3781,7 +3660,7 @@ class AdaptiveEngine(
         //      账陈旧时（前台门交接的边界 / MIUI / 用户拨了系统自动旋转开关）这一写会被传感器
         //      在几毫秒内覆盖，而日志留下一句「方向照搬上一块屏」的**假成功** —— 用户下次
         //      解锁才发现方向不对，且完全无从自查。
-        //      这条路径**不排读回**（见 [scheduleUncontrollableReadback]），所以不会误记名单，
+        //      这条路径**不排读回**（见 [scheduleSemiReadback]），所以不会误报，
         //      危害小于另外两处；但"写了等于没写还报成功"仍是 bug，判据统一按事实来。
         if (!_ui.value.takeoverOn || readAutoRotate() != 0) engageTakeover()
         if (readAutoRotate() != 0) {
@@ -3833,7 +3712,7 @@ class AdaptiveEngine(
         //   ⇒ 最终形态就是上面的 v6：**换屏时本模块不写 `USER_ROTATION`**，
         //     方向完全由框架灌它自己的槽位 ⇒ 用户看到的永远只是"保持这块屏的方向"
         //     （要用哪个方向，由用户通过「默认方向」定死），没有任何自动转动。
-        if (!AppPrefs.mode.value.engages) {
+        if (!AppPrefs.engagesAny) {
             event("形态切换 → ${form.label}：本档不介入 ⇒ 方向保持系统灌入值")
             return
         }
@@ -3890,9 +3769,9 @@ class AdaptiveEngine(
      * ⇒ 那条豁免在**内屏**上被误命中 ⇒ 桌面被停手 ⇒ 按了也没反应。
      * **不是"把桌面整体豁免了"，是"把内屏当成了外屏"。**
      *
-     * ⛔ 那条豁免已经删了，**但这个函数不能跟着删** —— `form` 现在仍然是三件事的输入：
+     * ⛔ 那条豁免已经删了，**但这个函数不能跟着删** —— `form` 现在仍然是两件事的输入：
      *   ① [AppPrefs.modeOf] 的闸（外屏恒 `SYSTEM` ⇒ 外屏完全不介入）；
-     *   ② [Uncontrollable] 名单的键（`包名@形态`）；③ 悬浮按钮的尺寸与画在哪块屏。
+     *   ② 悬浮按钮的尺寸与画在哪块屏。
      *   `form` 陈旧 ⇒ 在外屏误按内屏的模式跑、或按钮按错的屏画 —— 照样是"看着像坏了"。
      *
      * 为什么会陈旧：全工程能改 `form` 的只有 `AppPrefs.syncScreenForm`，它的触发源算下来只有两处 ——

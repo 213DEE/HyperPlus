@@ -10,6 +10,7 @@ import androidx.compose.ui.platform.LocalContext
 import androidx.compose.ui.res.stringResource
 import androidx.compose.ui.unit.dp
 import cn.dsr213.hyperplus.AppPrefs
+import cn.dsr213.hyperplus.AppRotateMode
 import cn.dsr213.hyperplus.CaptureStrategy
 import cn.dsr213.hyperplus.R
 import cn.dsr213.hyperplus.RotateMode
@@ -19,6 +20,7 @@ import top.yukonga.miuix.kmp.basic.Card
 import top.yukonga.miuix.kmp.basic.SmallTitle
 import top.yukonga.miuix.kmp.basic.Text
 import top.yukonga.miuix.kmp.basic.TextButton
+import top.yukonga.miuix.kmp.preference.ArrowPreference
 import top.yukonga.miuix.kmp.preference.RadioButtonPreference
 import top.yukonga.miuix.kmp.preference.SliderPreference
 import top.yukonga.miuix.kmp.preference.SwitchPreference
@@ -35,25 +37,30 @@ import top.yukonga.miuix.kmp.theme.MiuixTheme
  *   凡是"某个能力的全部设置"都装在一个二级页里，主页只留入口。
  *   以后新的能力照这个形状加即可，不用动主页的结构。
  *
- * 内容：
+ * 内容（★ **2026-10-06 重排后的顺序** —— 用户原话：「**还是很乱**，可以适当增加三级菜单，
+ *   要让所有功能都清晰明了」）：
  *   ① 模式        —— 内屏一份三态单选
- *   ② 开关        —— 省电优先 / 名单门控 / 停手交还 / 按钮等待时长
- *   ③ 使用提醒    —— 只在"当前这块屏"是自适应档时出现
- *   ④ 预览按钮    —— 叫悬浮按钮出来一次（传感器没法用电脑触发）
- *   ⑤ 方向        —— 一张卡（[DirectionSection]，2026-10-04）：**展开后的方向**，四选一，
- *                      每项配一部手机小图标（借 root 直写内屏槽位）。
- *                      ⚠️ 它下面原来还有一块「校准」，同日**整块删除** —— 改由引擎拿重力全自动。
- *   ⑦ 应用名单    —— 整块内容（[AppWhitelistSection]），见下面那条 2026-10-01 的说明
+ *   ② 方向        —— 一张卡（[DirectionSection]）：**展开后的方向**，四选一，每项配一部手机小图标
+ *                      ★ 2026-10-06 **上移到主设置区**：它此前被「使用提醒 / 预览按钮」两段
+ *                        **说明**压在**倒第二**，而用户进这一页 90% 就是为了改它。
+ *   ③ 开关        —— 省电优先 / 名单门控 / 停手交还 / 按钮等待时长
+ *   ④ 使用提醒    —— 只在"当前这块屏"是自适应档时出现
+ *   ⑤ 应用名单    —— **一行入口**（→ 三级页 [Route.RotationApps]）
  *
- * ============================ 2026-10-01：应用名单并进来了 ============================
- * 用户原话：「把应用名单合并进旋转增强页，不再是一个独立的二级菜单」。
- * ⇒ `Route.Apps` 已删除，那一页的内容变成这里的 ⑦（[AppWhitelistSection]，一个 `internal` 函数）。
- *   "名单里的应用不干预"那个总开关仍在 ② 里 —— 它是**行为开关**，
- *   而 ⑦ 是**它作用的明细**，两者挨得近正是合并的收益。
+ * 🔴 2026-10-06 删掉的一整段：**预览旋转按钮**（用户点名「去掉旋转增强的预览旋转按钮」）。
+ * ⇒ 页内从 **7 段降到 4 段**（模式 / 方向 / 开关 / 提醒）＋ 1 行入口 —— 一屏能看完。
  *
- * ⚠️ ⑦ 放在**整页最末尾**，不是紧跟那个开关：名单里的 A-Z 列表有一两百个应用（实测），
- *   插在中间会把 ③④⑤ 全部推进屏幕外几千像素，等于把它们埋了。
- *   放末尾时"旋转设置"仍在页面顶部一眼可见，名单作为明细垫底。
+ * ==================== 应用名单的"两进两出"（2026-10-01 / 2026-10-06）====================
+ * - **2026-10-01 进**：用户原话「把应用名单合并进旋转增强页，不再是一个独立的二级菜单」
+ *   ⇒ `Route.Apps` 删除，整块内容铺进这一页（那时是 `AppWhitelistSection()`）。
+ * - **2026-10-06 出**：用户改口径「**还是很乱，可以适当增加三级菜单**」⇒ 内容搬进三级页
+ *   [Route.RotationApps]（实现是 [WhitelistPage]，与分屏那份**共用**），本页只留**一行入口**。
+ *
+ * ★ 两次调整背后是**同一个理由**：名单是一两百行的巨型列表（实测）。
+ *   铺在页内会把页面上所有设置推出几屏外；而它又不能被删（"对谁生效"必须有地方管）。
+ *   ⇒ 结论：**内容留在体系里，长度搬出页面外**。⛔ 别再往页内铺。
+ * ⚠️ 2026-10-06 这次动的只是"**二级**菜单"那半句 —— 名单**仍然不是一个二级页**，
+ *   而是「二级页的一条入口 ＋ 一个三级页」。⛔ 别据此把它搬回二级页。
  *
  * ★ 旧的「配置通道」卡片**没有**搬进来 —— 它是所有设置生效的前置条件，
  *   搬进二级页会让"我改的东西到底生效没有"变成要翻进去才知道的事，
@@ -64,6 +71,13 @@ import top.yukonga.miuix.kmp.theme.MiuixTheme
 internal fun RotationPage(
     onBack: () -> Unit,
     onOpenSettings: () -> Unit,
+    /**
+     * 打开三级页（目前只有「应用名单」一个出口）。
+     * ★ 用 `(Route) -> Unit` 而不是一个专用的 `onOpenApps`：外壳那边本来就是
+     *   `go(route)`（`HyperPlusApp.kt`），多一个参数就能复用它，⛔ 不必为每个出口
+     *   各开一个回调 —— 那样每加一个三级入口都要动一次外壳。
+     */
+    onOpen: (Route) -> Unit,
 ) {
     // ★ 配置的真值一律来自 AppPrefs（**写配置的唯一入口**，也是引擎会跟随的那份文件的内存投影）。
     //   ⚠️ 绝不能从引擎回传的状态里取开关真值：状态是**慢变量**（变化才上报），
@@ -80,7 +94,18 @@ internal fun RotationPage(
     val gateEnabled by AppPrefs.gateEnabled.collectAsState()
     // ★ 2026-10-03：自适应旋转是**实验功能** ⇒ 默认不在模式单选里列出。
     //   开关在「实验功能」页（入口在功能主页最底下），见 [ExperimentalPage]。
+    //
+    // ★★ 2026-10-04：**同一个开关现在管两项** —— 「模式」里的自适应旋转
+    //   与「开关」里的省电优先（用户原话：「实验功能里面『自适应旋转』一个开关，
+    //   控制旋转增强页里面『自适应旋转』、『省电优先』两个功能的可见」）。
+    //   ⚠️ 名字沿用 `showAdaptive` 不再贴切，但**改个名要动的地方比它省下来的多**，
+    //     而且它会立刻误导下一个读者 —— 所以变量名保持，靠这段注释和 [ExperimentalPage] 的说明兜住。
+    //     判据仍然是"实验开关开没开"，与 [AppPrefs.setExperimentalAdaptive] 同一个值。
     val showAdaptive by AppPrefs.experimentalAdaptive.collectAsState()
+    // ★ R1（2026-10-05）：这一项 + 逐应用的档，一起决定「读不到光线时降级」那个开关
+    //   列不列出来（理由写在开关旁边那一行，别只看这里的名字猜）。
+    val r1Fallback by AppPrefs.r1Fallback.collectAsState()
+    val appModes by AppPrefs.appModes.collectAsState()
     val hintMs by AppPrefs.hintMs.collectAsState()
     val ctx = LocalContext.current
 
@@ -123,22 +148,88 @@ internal fun RotationPage(
             ),
         )
         ModePicker(value = modeInner, showAdaptive = showAdaptive)
+
+        // ---------------------------------------------------- 展开后的方向（**主设置**，2026-10-06 上移）
+        //
+        // ★★ 原先这里是**两张卡**：「方向校准」（内联在本文件）与「默认方向」
+        //   （原 `ui/SlotCalibrationSection.kt`）。用户当天把两块一起否了 ——
+        //   原话「用不明白，不会知道正确的竖屏方向是哪一边，也看不懂手机横屏、摄像头朝左是什么姿势」。
+        //   ⇒ 先合并成一张 [DirectionSection]，姿势一律**画成图**。
+        //
+        // ★★★ 随后用户又追加一条：「**不要用摄像头来校准了，用重力传感器**」
+        //   ⇒ 校准**整块删除**（含瞄准器、①② 分步、重新校准按钮），改由引擎全自动：
+        //     `AdaptiveEngine.noteSignEvidence` 每轮都用**重力扇区**校验符号位，证据够了自动翻正。
+        //     ⇒ 用户从此**一个按钮都不用点**。完整理由见 [DirectionSection] 的类注释。
+        //
+        // ★★ 2026-10-06 位置**再动一次**（用户原话：「**还是很乱**，可以适当增加三级菜单，
+        //   要让所有功能都清晰明了」）：它原本被「使用提醒」「预览旋转按钮」两段**说明**
+        //   压在**倒第二**，而用户进这一页 90% 就是为了改它。
+        //   ⇒ 现在紧跟「模式」，两者并列为这一页的**两件主设置**；其余一切（开关 / 提醒 / 名单）
+        //     都排在它后面。
+        //   ⛔ 别把它再挪回后面 —— 这条已按方案 R5「③ 主设置必须落在首屏」定过一次。
+        //
+        // ⚠️ 原来内联在这里的 `LiveAngleSection()`（角度盘 + 原始读数行）已一并退役：
+        //   它本来就是给校准看的，校准没了它就没有存在的理由。
+        //   ✅ 2026-10-04：界面之外那条链（引擎采样循环 + `live_angle` 读数键 + 解析器）
+        //     也一并删除，不留半截。⛔ 别再把任何"实时角度显示"加回来。
+        DirectionSection()
+
         // ⚠️ 2026-10-02：这里原来还有一张「你现在在外屏」说明卡，已搬到页面**最顶部**
         //   并升级成红条（[OuterScreenBanner]）。⛔ 别把说明卡加回来 —— 两处说同一件事，
         //   而且中段那张会被当成普通说明扫过去。
 
         // ---------------------------------------------------- 开关
         SectionCard(title = stringResource(R.string.rotation_section_switches)) {
-            SwitchPreference(
-                title = stringResource(strategy.labelRes),
-                summary = stringResource(strategy.summaryRes),
-                checked = strategy == CaptureStrategy.POWER_SAVING,
-                onCheckedChange = { on ->
-                    AppPrefs.setStrategy(
-                        if (on) CaptureStrategy.POWER_SAVING else CaptureStrategy.RESPONSIVE,
-                    )
-                },
-            )
+            // ★★ 2026-10-04：省电优先**只在会开相机的档位下才有意义**，所以它的可见性
+            //   比自适应旋转还多一道闸 —— 两个条件**都要**满足才列出：
+            //     ① 实验开关开着（`showAdaptive`，与自适应旋转共用同一个开关）；
+            //     ② **当前生效档是自适应**（`mode == RotateMode.ADAPTIVE`）。
+            //
+            //   ⛔ 为什么必须有②（2026-10-04 用户指出，我第一版写错过）：
+            //     省电优先管的是**相机策略**（`POWER_SAVING` = 用完就关 / `RESPONSIVE` = 保温），
+            //     而**半自动与跟随系统压根不开相机**（半自动靠重力+按钮，见 [RotateMode.SEMI] 的注释）
+            //     ⇒ 那两种档位下拨这个开关**什么都不会发生**。
+            //     把它列出来 = 摆一个"按了没反应"的开关在用户面前，比不列更糟。
+            //   ⚠️ 也不要因为它"当前值是 POWER_SAVING"就强行列出（我第一版就是这么写的）——
+            //     那正是上面那种"不生效却看得见"的状态。
+            //
+            //   ⚠️ 代价（知道清楚再改）：切档时它会**忽隐忽现**。这是刻意的 ——
+            //     它的价值就在于"只在真起作用的时候出现"，而不是当个摆设。
+            if (showAdaptive && mode == RotateMode.ADAPTIVE) {
+                SwitchPreference(
+                    title = stringResource(strategy.labelRes),
+                    summary = stringResource(strategy.summaryRes),
+                    checked = strategy == CaptureStrategy.POWER_SAVING,
+                    onCheckedChange = { on ->
+                        AppPrefs.setStrategy(
+                            if (on) CaptureStrategy.POWER_SAVING else CaptureStrategy.RESPONSIVE,
+                        )
+                    },
+                )
+            }
+            // ★★ 2026-10-05（R1）：自适应「读不到环境」时降级成半自动。
+            //
+            //   可见性判据与上面那个省电优先**同源**（两者都只在"**有可能开相机**"时才有意义，
+            //   见那一段的理由），但多认一种情形：**逐应用的档**。
+            //   ⛔ 为什么不能只看全局档 `mode`：R2（2026-10-05）之后"档位"是逐应用的 ——
+            //     用户完全可以全局设成半自动、只给某个应用点名自适应。那时这个开关**是有作用的**，
+            //     只按全局档判就会把它藏起来，而用户恰恰是为了那几个应用才需要它。
+            //   ⛔ 也别因为"当前值是出厂默认的 true"就强行列出 —— 那正是"不生效却看得见"。
+            val hasAdaptive = mode == RotateMode.ADAPTIVE ||
+                appModes.values.any { it == AppRotateMode.ADAPTIVE }
+            if (showAdaptive && hasAdaptive) {
+                SwitchPreference(
+                    title = stringResource(R.string.rotation_fallback_title),
+                    summary = stringResource(
+                        if (r1Fallback) R.string.rotation_fallback_on
+                        else R.string.rotation_fallback_off,
+                    ),
+                    checked = r1Fallback,
+                    // ⚠️ 真正的判定（连续几轮算"读不到"、多久试一次恢复）全在**引擎**里
+                    //   （`AdaptiveEngine.noteAdaptiveEnv` / `mode`）—— 这里只是用户的意愿开关。
+                    onCheckedChange = { on -> AppPrefs.setR1Fallback(on) },
+                )
+            }
             // ★ 前台门的**总开关**（2026-09-28 新增，用户报「该转的时候不转」）。
             //   门控是全工程唯一"主动放弃干活"的机制，名单一旦少勾/多勾，
             //   症状就是"没反应"。这个开关就是留给用户的逃生阀。
@@ -258,61 +349,42 @@ internal fun RotationPage(
             }
         }
 
-        // ---------------------------------------------------- 预览按钮
+        // ---------------------------------------------------- 预览旋转按钮（2026-10-06 **整段删除**）
         //
-        // ★ 为什么要给用户这个按钮：半自动的旋转按钮只在"传感器判定设备姿态 ≠ 屏幕方向"
-        //   时弹出，而**传感器没法用 adb 注入**（装机验证时最痛的一点）——
-        //   想知道按钮长什么样、在哪、多大，只能靠人把手机转一下。
-        //   ⇒ 给一条"叫它出来一次"的路径（链路见 [PrefsBridge.HINT_TEST]）。
-        // ⚠️ 它**只影响外观验证**：弹出来的按钮点下去走的仍是真实路径（写方向 + 读回），
-        //   所以这不是"绕过传感器"的入口，也不能用来测"这个应用能不能转"。
-        TextCard(title = stringResource(R.string.rotation_preview_title)) {
-            // ⚠️ 2026-10-01 精简：删掉"传感器没法用电脑触发"（那是我们验证时的不便，
-            //   跟用户无关）与"停留时长就是上面的设置"（上面就是那一条，不必再说一次）。
-            // ⚠️ 2026-10-02 再精简：三句 → 两句，"位置和平时一样"并进第一句。
-            Text(
-                text = stringResource(R.string.rotation_preview_body),
-                color = MiuixTheme.colorScheme.onSurfaceVariantSummary,
-                style = MiuixTheme.textStyles.paragraph,
-            )
-            TextButton(
-                text = stringResource(R.string.rotation_preview_button),
-                onClick = { AppPrefs.requestHintTest() },
-                modifier = Modifier.fillMaxWidth().padding(top = 8.dp),
+        // 🔴 用户原话：「**去掉旋转增强的预览旋转按钮**」⇒ 整段删除（含入口与三处文案调用）。
+        //
+        // ★ 它本来就是**验证工具**，不是用户设置：半自动的旋转按钮只在"传感器判定设备姿态
+        //   ≠ 屏幕方向"时弹出，而传感器没法用 adb 注入 ⇒ 当时只能靠这个按钮"叫它出来一次"
+        //   看外观（链路见 [PrefsBridge.HINT_TEST]）。功能稳定之后它就没用了，
+        //   而它和「模式 / 方向」并列摆在正式设置页里，本身就是"乱"的一部分 ——
+        //   读者无法判断这一条到底该不该动。
+        //
+        // ⛔ 别加回来（已否一次）。
+        // ⚠️ `AppPrefs.requestHintTest()` 与引擎侧 `PrefsBridge.HINT_TEST` 那条链**保留不动**：
+        //   删界面入口不必连底层链路一起拆，而拆它要动引擎 —— 本轮只改 App 侧 UI。
+        //   （`requestHintTest` 因此暂时没有界面调用点，这是**有意**留下的，不是漏删。）
+
+        // ---------------------------------------------------- 应用名单（**一行入口**，2026-10-06 改）
+        //
+        // ★★ 2026-10-01 用户原话是「把应用名单合并进旋转增强页，不再是一个独立的二级菜单」
+        //   ⇒ 那时整块内容（`AppWhitelistSection()`）铺在这里。
+        //   2026-10-06 用户改口径：「**还是很乱，可以适当增加三级菜单，要让所有功能都清晰明了**」
+        //   —— 名单是一两百行的巨型列表，铺在页内会把上面所有设置推出几屏外。
+        //   ⇒ 现在这里只有**一行入口**，内容搬进三级页 [Route.RotationApps]。
+        //   完整理由（以及"为什么这不是把那半句口径推翻"）见类注释那段"两进两出"。
+        //
+        // ★ 它固定在**整页最末**：作用对象（"对谁生效"）永远排在设置之后 ——
+        //   这是骨架 R5 的第 ⑤ 段。⛔ 别因为"就剩一行了"就把它往上提。
+        //
+        // ⚠️ 摘要**不给数字**（不写"已设置 N 个"）：那个数要从名单与逐应用档两处合起来算，
+        //   而"两处各算一遍"正是本工程反复踩过的坑（判据只允许有一份）。宁可少一个数字。
+        SectionCard(title = stringResource(R.string.wl_entry_section)) {
+            ArrowPreference(
+                title = stringResource(R.string.wl_page_title),
+                summary = stringResource(R.string.wl_entry_summary),
+                onClick = { onOpen(Route.RotationApps) },
             )
         }
-
-        // ---------------------------------------------------- 方向（2026-10-04 合并重做 + 删校准）
-        //
-        // ★★ 原先这里是**两张卡**：「方向校准」（内联在本文件）与「默认方向」
-        //   （原 `ui/SlotCalibrationSection.kt`）。用户当天把两块一起否了 ——
-        //   原话「用不明白，不会知道正确的竖屏方向是哪一边，也看不懂手机横屏、摄像头朝左是什么姿势」。
-        //   ⇒ 先合并成一张 [DirectionSection]，姿势一律**画成图**。
-        //
-        // ★★★ 随后用户又追加一条：「**不要用摄像头来校准了，用重力传感器**」
-        //   ⇒ 校准**整块删除**（含瞄准器、①② 分步、重新校准按钮），改由引擎全自动：
-        //     `AdaptiveEngine.noteSignEvidence` 每轮都用**重力扇区**校验符号位，证据够了自动翻正。
-        //     ⇒ 用户从此**一个按钮都不用点**。完整理由见 [DirectionSection] 的类注释。
-        //
-        // ⚠️ 位置：紧跟「开关」、在名单之前 —— 名单有一两百行，只能待在整页末尾。
-        // ⚠️ 原来内联在这里的 `LiveAngleSection()`（角度盘 + 原始读数行）也一并退役：
-        //   它本来就是给校准看的，校准没了它就没有存在的理由。
-        //   ⛔ 别再把任何"实时角度显示"加回来。
-        DirectionSection()
-
-        // ---------------------------------------------------- 应用名单（2026-10-01 合并进来）
-        //
-        // ★★ 用户原话：「把应用名单合并进旋转增强页，不再是一个独立的二级菜单」。
-        //   它原来是 `Route.Apps` 这另一个二级页，入口挂在上面 ② 的开关里。
-        //   ⇒ 现在整块内容直接铺在这里，不再有中间那一跳；`Route.Apps` 连同它的顶栏一起删了。
-        //
-        // ⚠️ 为什么放在**整页最末尾**、而不是紧跟②那个"名单里的应用不干预"开关：
-        //   名单里的 A-Z 列表有一两百个应用，插在中间会把 ③④⑤ 全部推进屏幕外几千像素。
-        //   完整理由见类注释 ⑦ 那段，别在这里重抄。
-        //
-        // ⚠️ 它内部会发射一长串「小标题 + 卡片」兄弟节点，所以调用点必须在**一个 Column 里** ——
-        //   这里正是 [SubPage] 的内容列，满足。⛔ 别把它挪进 Card / Row / Box。
-        AppWhitelistSection()
     }
 }
 

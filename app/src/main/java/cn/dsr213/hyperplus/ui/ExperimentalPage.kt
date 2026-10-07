@@ -6,6 +6,10 @@ import androidx.compose.foundation.layout.padding
 import androidx.compose.runtime.Composable
 import androidx.compose.runtime.collectAsState
 import androidx.compose.runtime.getValue
+import androidx.compose.runtime.mutableStateOf
+import androidx.compose.runtime.remember
+import androidx.compose.runtime.rememberCoroutineScope
+import androidx.compose.runtime.setValue
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.res.stringResource
 import androidx.compose.ui.text.font.FontWeight
@@ -13,6 +17,7 @@ import androidx.compose.ui.unit.dp
 import androidx.compose.ui.unit.sp
 import cn.dsr213.hyperplus.AppPrefs
 import cn.dsr213.hyperplus.R
+import kotlinx.coroutines.launch
 import top.yukonga.miuix.kmp.basic.Card
 import top.yukonga.miuix.kmp.basic.CardDefaults
 import top.yukonga.miuix.kmp.basic.Text
@@ -45,6 +50,16 @@ import top.yukonga.miuix.kmp.theme.MiuixTheme
  *    把正在用自适应的人踢走（本机当前档就是自适应）。理由写在
  *    `AppPrefs.setExperimentalAdaptive` 的注释里 —— ⛔ 别在这里"顺手"加上联动。
  *
+ * ②′ **这一个开关管两项**（2026-10-04 用户点名）：
+ *    「实验功能里面『自适应旋转』一个开关，控制旋转增强页里面『自适应旋转』、
+ *      『省电优先』两个功能的可见」。
+ *    ⇒ 它不是一个"自适应旋转专属开关"，而是**这两项的实验总闸**。
+ *    ⚠️ 两个受控项的**列出条件并不相同**（别以为开了闸就两个都出现）：
+ *      · **自适应旋转**：开了闸就出现在「模式」单选里（当前档正是它时也列出）；
+ *      · **省电优先**：还要**当前档是自适应**才出现 —— 因为它管的是**相机策略**，
+ *        而半自动与跟随系统压根不开相机，那时它按了也没用（见 `RotationPage` 里那处注释）。
+ *    ⚠️ 开关**标题仍叫「自适应旋转」**（用户没让改；它也是这项功能的招牌）。
+ *
  * ③ **说明卡讲的是后果、不是机制**：用户想知道的是"我关了它，我现在的设置会不会变"，
  *    不是"这个布尔值参与哪些判断"。
  */
@@ -53,6 +68,20 @@ internal fun ExperimentalPage(
     onBack: () -> Unit,
 ) {
     val adaptive by AppPrefs.experimentalAdaptive.collectAsState()
+    // ★ 第二个实验闸门（2026-10-06）：与上面的自适应开关并列，两者互不相干。
+    val multiSplit by AppPrefs.experimentalMultiSplit.collectAsState()
+
+    // ---------------------------------------------------- 这个开关为什么需要「异步 + 失败不改」
+    //
+    // ★ 它**要走 root**：值必须落进 `persist.*` 属性（引擎在进程起来的第一个毫秒
+    //   就要读到它，理由与实测数字见 `AppPrefs.applyExperimentalMultiSplit` 的注释）
+    //   ⇒ 点击后异步申请，写成功才改状态。
+    // ★ 失败时**一个字都不改**，于是 Switch 会自己弹回原位 —— 手感上就是「拨不开」。
+    //   这不是缺陷，是刻意的：属性没写进去 = 引擎永远读不到 = 开到天亮也不生效，
+    //   那时一个「看着像开了」的开关就是骗人。
+    val scope = rememberCoroutineScope()
+    var multiSplitBusy by remember { mutableStateOf(false) }
+    var multiSplitDenied by remember { mutableStateOf(false) }
 
     SubPage(title = stringResource(R.string.experimental_title), onBack = onBack) {
         // ---------------------------------------------------- 置顶红标（用户点名）
@@ -69,11 +98,65 @@ internal fun ExperimentalPage(
                 checked = adaptive,
                 onCheckedChange = { AppPrefs.setExperimentalAdaptive(it) },
             )
+
+            // ---------------------------------------------------- 第二个实验闸门（2026-10-06）
+            //
+            // ★ 与上面那个开关**并列**，理由正是本页的定位：「实验功能」只放
+            //   「某个功能要不要出现 / 要不要生效」。分屏上限**没有参数**——
+            //   用户 2026-10-06 明确「不给滑块了，默认提高到 8」。
+            //
+            // ⚠️ 但它与「自适应旋转」有本质差别：那个只改**可见性**，这个**改系统行为**。
+            //   ⇒ 摘要里必须把「要重启系统界面」说出来，否则用户打开后折了没反应，
+            //     会以为功能坏了（而实际只是差一次重启）。
+            SwitchPreference(
+                title = stringResource(R.string.experimental_multisplit_title),
+                summary = stringResource(R.string.experimental_multisplit_summary),
+                checked = multiSplit,
+                onCheckedChange = { want ->
+                    // ⚠️ busy 期间**忽略点击**：否则连点会并发起好几个 su 进程
+                    //   （`RootShell` 类注释里那条纪律：每次调用都要起一个 su）。
+                    if (!multiSplitBusy) {
+                        multiSplitBusy = true
+                        scope.launch {
+                            val ok = AppPrefs.applyExperimentalMultiSplit(want)
+                            // ★ 成功 ⇒ 状态已被 AppPrefs 改掉，开关自己跟上；
+                            //   失败 ⇒ 状态没动，Switch 会自己弹回去（= 拨不开）。
+                            multiSplitDenied = !ok
+                            multiSplitBusy = false
+                        }
+                    }
+                },
+            )
+
+            // ---------------------------------------------------- 「拨不开」时怎么告诉用户
+            //
+            // ★ 只在**刚失败过**时出现（成功、或重进页面都不显示）—— 用户要的是
+            //   「为什么没拨动」，不是一条常驻的警告。
+            // ★ 文案只讲**要做什么**（去哪儿授权），不讲机制。
+            // ★ 样式照抄 [DirectionSection] 里那条 root 操作失败提示（同一套
+            //   `onSurfaceVariantSummary` + `paragraph` + 16dp 内边距的组合）——
+            //   ⛔ 不发明新控件，也不新造一套强调写法。
+            if (multiSplitDenied) {
+                Text(
+                    text = stringResource(R.string.experimental_multisplit_need_root),
+                    color = MiuixTheme.colorScheme.onSurfaceVariantSummary,
+                    style = MiuixTheme.textStyles.paragraph,
+                    modifier = Modifier.padding(start = 16.dp, end = 16.dp, top = 4.dp, bottom = 14.dp),
+                )
+            }
         }
 
         // ---------------------------------------------------- 说明（讲后果）
         TextCard {
             Note(stringResource(R.string.experimental_adaptive_note))
+        }
+
+        // ---------------------------------------------------- 第二条说明（讲后果 + 指下一步）
+        //
+        // ★ 措辞刻意**不给机制**：用户要知道的是「它稳不稳、我要多做一步什么」，
+        //   不是「这个布尔值参与哪些判断」。
+        TextCard {
+            Note(stringResource(R.string.experimental_multisplit_note))
         }
     }
 }

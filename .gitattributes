@@ -10,5 +10,6 @@
 *.jpg binary
 *.jar binary
 *.aar binary
+*.so binary
 *.keystore binary
 *.jks binary

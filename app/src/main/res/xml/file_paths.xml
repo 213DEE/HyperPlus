@@ -1,0 +1,15 @@
+<?xml version="1.0" encoding="utf-8"?>
+<!--
+  分享「诊断日志」用的 FileProvider 路径表（2026-10-06）。
+
+  ★ 为什么必须用它：把文件交给别的应用（微信 / 邮件 / 文件管理器）时，
+    Android 7 起禁止直接传 `file://` URI（抛 FileUriExposedException），
+    必须换成 content:// + 临时读权限 —— 那正是 FileProvider 干的事。
+
+  ★ 只暴露**一个**子目录（`cacheDir/exports/`），不是整个缓存目录：
+    暴露面越小越好，而且导出文件本来就该放在这里（系统清缓存时顺带收走，不占用户空间）。
+  ⛔ 别加成 `<root-path>` / `<external-path>` —— 那等于把整块存储交出去。
+-->
+<paths>
+    <cache-path name="exports" path="exports/" />
+</paths>
