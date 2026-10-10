@@ -190,6 +190,14 @@ class HyperPlusModule : XposedModule() {
         runCatching { SplitProbe.install(this, hostCtx, classLoader) }
             .onFailure { Log.e(TAG, "分屏探针安装失败（已吞掉）", it) }
 
+        // ⑥b ★ 分屏**几何**探针（2026-10-11 新增，同样**默认关闭**）。
+        //   用途：专查"开 7/8 格出 bug"——把 `MultipleSplitLayout` 六张 List 的实时 size
+        //   与几何方法入参打出来，据此**确证**越界点（见 [SplitGeomProbe] 类注释）。
+        //   ⚠️ 与上一条是**两个独立开关**：SplitProbe 查"哪条链进了分屏"，
+        //      SplitGeomProbe 查"进了之后几何哪里错"。
+        runCatching { SplitGeomProbe.install(this, hostCtx, classLoader) }
+            .onFailure { Log.e(TAG, "分屏几何探针安装失败（已吞掉）", it) }
+
         // ⑦ ★ 分屏触发器（2026-10-04 新增，功能 1：**轻折一下 → 分屏 +1**，**默认关闭**）。
         //   ⚠️ 它先读三档开关（`Settings.Global` 的 [SplitTrigger.KEY]）：
         //     0 = 关 / 1 = 只观察（只打日志，绝不进分屏）/ 2 = 真动作。
