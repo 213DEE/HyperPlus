@@ -144,6 +144,16 @@
     <string name="function_split_title">Split screen enhancements</string>
     <string name="function_split_summary">Direction of the 2-app split: %1$s</string>
     <string name="split_title">Split screen enhancements</string>
+    <!-- ================================================ Fold to split (2026-10-07) -->
+    <!-- ★★★ This group is the fix for issue #1: the feature previously had only an
+         adb-set Settings.Global switch and no UI entry, so for users it was permanently
+         off — the detection chain ran correctly but always stopped at "not executed".
+         Never switch it to write Settings.Global from the app: the app cannot write that
+         namespace (signature-level permission). The real path is App prefs, see
+         PrefsBridge.SPLIT_TRIGGER_ON. -->
+    <string name="split_trigger_section">Fold to split</string>
+    <string name="split_trigger_title">Fold to add a split</string>
+    <string name="split_trigger_summary">A light fold squeezes the current app into half the screen and adds one more pane. Still works after you switch apps.</string>
     <string name="split_dir_section">Direction of the 2-app split</string>
     <string name="split_dir_note">When a light fold adds another split pane, which side the current app stays on.</string>
     <string name="split_dir_left">To the left</string>

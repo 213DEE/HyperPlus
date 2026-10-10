@@ -91,6 +91,28 @@ internal fun SplitScreenPage(
     // ⛔ 别把轮询加回来：页面级的生命周期与"用户什么时候折手机"在时间上毫无关系。
 
     SubPage(title = stringResource(R.string.split_title), onBack = onBack) {
+        // ------------------------------------------------ 「轻折加分屏」总开关（2026-10-07 新增）
+        //
+        // ★★★ 它为什么必须存在：这个功能此前**只有**一条由 adb 设的 `Settings.Global` 档位键
+        //   （`hyperplus_split_trigger`），界面上没有入口 ⇒ 对用户恒为"关"：
+        //   判定链跑得再对，也永远停在 `(只观察模式) … —— 未执行`。
+        //   完整复盘（含外部用户的报障日志）见 [PrefsBridge.SPLIT_TRIGGER_ON]。
+        //
+        // ★ 位置：**整页第一个** —— 它是"要不要用这个功能"的总闸，下面三项（展开方向 /
+        //   高温保护 / 应用名单）都是它的参数。把总闸埋在参数后面，等于让用户先调参数再找开关。
+        // ⚠️ 与「高温保护」分属两张卡：那一个改的是**厂商的安全保护**（值得自己一段小标题，
+        //   理由见 [ThermalSection] 的注释），本开关只是"功能开不开"，性质完全不同。
+        val triggerOn by AppPrefs.splitTriggerOn.collectAsState()
+        SmallTitle(text = stringResource(R.string.split_trigger_section))
+        Card(modifier = Modifier.padding(bottom = 12.dp)) {
+            SwitchPreference(
+                checked = triggerOn,
+                onCheckedChange = { AppPrefs.setSplitTriggerOn(it) },
+                title = stringResource(R.string.split_trigger_title),
+                summary = stringResource(R.string.split_trigger_summary),
+            )
+        }
+
         SmallTitle(text = stringResource(R.string.split_dir_section))
         Card(modifier = Modifier.padding(bottom = 12.dp)) {
             // ★ 说明放在选项**之上**：它解释的是"这一组选项在管什么"，

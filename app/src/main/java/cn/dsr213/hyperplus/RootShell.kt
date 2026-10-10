@@ -58,7 +58,7 @@ internal object RootShell {
      */
     suspend fun putSystemInt(key: String, value: Int): Boolean = withContext(Dispatchers.IO) {
         val script = "settings put system $key $value; settings get system $key"
-        val text = runShell(script) ?: return@withContext false
+        val text = runShell(script)?.out ?: return@withContext false
         // 输出里可能混着 stderr（见 [exec] 的 redirectErrorStream）⇒
         // 只认**最后一个非空行**，解析不出数字就算失败。
         text.lineSequence()
@@ -76,7 +76,7 @@ internal object RootShell {
      * @return 读不到 / 不是整数 ⇒ null
      */
     suspend fun getSystemInt(key: String): Int? = withContext(Dispatchers.IO) {
-        runShell("settings get system $key")?.trim()?.toIntOrNull()
+        runShell("settings get system $key")?.out?.trim()?.toIntOrNull()
     }
 
     /**
@@ -108,7 +108,7 @@ internal object RootShell {
      */
     suspend fun putProp(key: String, value: String): Boolean = withContext(Dispatchers.IO) {
         val script = "setprop $key $value; getprop $key"
-        val text = runShell(script) ?: return@withContext false
+        val text = runShell(script)?.out ?: return@withContext false
         text.lineSequence()
             .map { it.trim() }
             .lastOrNull { it.isNotEmpty() } == value
@@ -131,7 +131,14 @@ internal object RootShell {
      *         非 null = 命令的输出（stdout 与 stderr 已合并，顺序即发生顺序）
      */
     suspend fun runRaw(script: String): String? = withContext(Dispatchers.IO) {
-        runShell(script)
+        // ★★ 2026-10-07：超时（`code < 0`，见 [exec]）必须映射成 **null**。
+        //   在此之前它返回的是**空串** —— 而空串会被调用方读成"命令成功、只是没输出"。
+        //   issue #2 报告里那句 `(未读到)` 的真因就是这个：诊断脚本 15 秒没跑完被强杀，
+        //   报告却把它显示成"这一项没读到"，于是"su 太慢"这条线索**完全传不出来**。
+        //   ⚠️ `code > 0`（命令非 0 退出）**不**映射成 null：那种情况 out 里往往有原文
+        //     （stderr 已并进 stdout，见 [exec]），对排查有价值，照原样给调用方。
+        val r = runShell(script) ?: return@withContext null
+        r.out.takeIf { r.code >= 0 }
     }
 
     private data class ShellResult(val code: Int, val out: String)
@@ -173,7 +180,7 @@ internal object RootShell {
      *    真正的写入仍然要靠 [putSystemInt] 自己的读回校验兜底。
      */
     suspend fun probe(): RootStatus = withContext(Dispatchers.IO) {
-        val out = runShell("id") ?: return@withContext RootStatus.UNAVAILABLE
+        val out = runShell("id")?.out ?: return@withContext RootStatus.UNAVAILABLE
         if (out.contains("uid=0")) RootStatus.GRANTED else RootStatus.DENIED
     }
 
@@ -186,9 +193,14 @@ internal object RootShell {
      *   · 跑不动（su 不存在 ⇒ 抛异常）⇒ 记下来继续试下一个；
      *   · 跑得动但命令报错 ⇒ **立刻返回原文**，别换路径重试（换的是 su，不是命令）。
      *
+     * ★★ 2026-10-07：返回**整个 [ShellResult]**（原先是裸 `String`）——
+     *   因为"**超时被强杀**"（`code < 0`）与"命令成功但没输出"（`code == 0`、空串）
+     *   此前**长得一模一样**（都是空串/空），调用方只能把前者说成后者。
+     *   issue #2 的报告里那句 `(未读到)` 就是这么来的（真因是 su 脚本 15 秒没跑完）。
+     *
      * @return null = 这台机器上根本没能用的 su（调用方据此判定"能力缺失"）
      */
-    private fun runShell(script: String): String? {
+    private fun runShell(script: String): ShellResult? {
         for (su in SU_CANDIDATES) {
             val r = runCatching { exec(suArgs(su, script)) }.getOrNull() ?: continue
             Log.i(TAG, "root 执行（$su）：exit=${r.code}｜${r.out.take(200)}")
@@ -199,9 +211,9 @@ internal object RootShell {
                 Log.w(TAG, "$su 不认 -M，退回不带 -M 重试")
                 val r2 = runCatching { exec(arrayOf(su, "-c", script)) }.getOrNull() ?: continue
                 Log.i(TAG, "root 执行（$su，无 -M）：exit=${r2.code}｜${r2.out.take(200)}")
-                return r2.out
+                return r2
             }
-            return r.out
+            return r
         }
         Log.w(TAG, "root 不可用（试过 ${SU_CANDIDATES.joinToString()}）")
         return null

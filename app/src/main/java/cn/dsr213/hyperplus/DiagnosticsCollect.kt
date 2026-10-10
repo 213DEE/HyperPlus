@@ -8,6 +8,8 @@ import java.text.SimpleDateFormat
 import java.util.Date
 import java.util.Locale
 import java.util.concurrent.TimeUnit
+import kotlinx.coroutines.Dispatchers
+import kotlinx.coroutines.withContext
 
 /**
  * 「导出诊断日志」的**采集层** —— 把所有能读到的线索收成一段段文本。
@@ -111,16 +113,34 @@ internal object DiagnosticsCollect {
     /** 非 root 的 shell 命令也必须有超时（挂住就等于把界面吊死） */
     private const val SHELL_TIMEOUT_MS = 5_000L
 
+    /**
+     * 借 root 的脚本**没拿到输出**时的统一说明（2026-10-07 新增）。
+     *
+     * ★ 为什么不能只写一句「(未读到)」：`RootShell.runRaw` 返回 null 有三种**完全不同**的原因
+     *   —— su 脚本超时被强杀 / 授权被拒 / 这台机器没有可用的 su。只写「未读到」，
+     *   用户会以为"日志功能坏了"，而排障的人拿不到任何线索。其中"脚本超时"还往往是
+     *   **我们自己的脚本太重**（issue #2 的 `(未读到)` 就是这条）⇒ 三种可能全写出来。
+     */
+    private const val ROOT_SCRIPT_FAILED =
+        "（没拿到 —— su 在 15 秒内没跑完（会被强制结束）、授权被拒、或这台机器没有可用的 su。\n" +
+            "  想手工取模块日志：adb shell su -c \"logcat -d -s HyperPlusSplit FaceRotate HyperPlusModule\"）"
+
     // ================================================================ 入口
 
     /**
      * 采一份完整报告。
      *
-     * **不要在主线程序列化调用** —— 里面会跑 `su`（有 root 时）与 `logcat`。
+     * ★★★ 2026-10-07：**整段跑在 `Dispatchers.IO` 上**（见下面的 `withContext`）。
+     *   原来自称"不要在主线程序列化调用"，但唯一调用方（`ui/DiagnosticsPage`）用的是
+     *   `rememberCoroutineScope()` —— 那是 **Compose 主线程 dispatcher** ⇒ 真机上点一次
+     *   「导出诊断日志」就把界面卡死 5 秒以上（issue #2 的日志里：`APP_SCOUT_HANG duration=5005ms`、
+     *   `Choreographer: Skipped 489 frames!`、`HWUI: Davey! duration=5441ms`）。
+     *   ⇒ 与其指望调用方自觉，不如**在这里自己保证**：本函数内部全是阻塞 IO
+     *     （`su` / `logcat` / `Process.waitFor`），本来就不该跑在任何 UI 线程上。
      *
      * @return `文件名 to 内容`
      */
-    suspend fun collect(ctx: Context): Pair<String, String> {
+    suspend fun collect(ctx: Context): Pair<String, String> = withContext(Dispatchers.IO) {
         val app = ctx.applicationContext ?: ctx
         val now = System.currentTimeMillis()
         val stamp = SimpleDateFormat("yyyyMMdd_HHmm", Locale.US).format(Date(now))
@@ -156,7 +176,7 @@ internal object DiagnosticsCollect {
         sections += logSections(root)
 
         Log.i(TAG, "诊断报告已采集：${sections.size} 段（root=${rootText(root)}）")
-        return DiagnosticsReport.fileName(stamp) to DiagnosticsReport.build(header, sections)
+        DiagnosticsReport.fileName(stamp) to DiagnosticsReport.build(header, sections)
     }
 
     private fun rootText(r: RootShell.RootStatus?): String = when (r) {
@@ -347,11 +367,14 @@ internal object DiagnosticsCollect {
         } else {
             "App 自身日志（logcat，只看得到本进程）"
         }
+        // ★★ 2026-10-07：改用 [shellOut] —— 把**真实原因**写进报告。
+        //   原先这里无论超时还是被限制都只写一句"本机可能限制了应用读 logcat"，
+        //   而 issue #2 的现场证明那句话是**猜的**（真因是 5 秒超时）。
+        val appLog = shellOut(arrayOf("logcat", "-d", "-t", "$TAIL_APP_LOG"))
+        if (appLog.text == null) Log.w(TAG, "读 App 自身 logcat 失败：${appLog.why}")
         out += DiagnosticsReport.raw(
             appLogTitle,
-            shell(arrayOf("logcat", "-d", "-t", "$TAIL_APP_LOG")).also {
-                if (it == null) Log.w(TAG, "读 App 自身 logcat 失败（可能被系统限制）")
-            } ?: "（读不到 —— 本机可能限制了应用读 logcat）",
+            appLog.text ?: "（读不到 —— ${appLog.why}）",
         )
 
         if (root != RootShell.RootStatus.GRANTED) {
@@ -370,7 +393,11 @@ internal object DiagnosticsCollect {
         //   格式与 `SimpleDateFormat` 的 `MM-dd HH:mm:ss.SSS` 一致（本机实测通过）。
         val allSince = SimpleDateFormat("MM-dd HH:mm:ss.SSS", Locale.US)
             .format(Date(System.currentTimeMillis() - ALL_LOG_WINDOW_MS))
-        val script = buildString {
+        // ★★★ 2026-10-07：**拆成两段 su 脚本**（原先是一条大脚本"抓全"）。
+        //   起因是 issue #2：那条脚本 15 秒跑不完 ⇒ 被 `RootShell` **整条强杀**（日志里的 `exit=-1`）
+        //   ⇒ 报告里「模块日志」那段只剩一句 `(未读到)`，**一条有效信息都没有**。
+        //   拆开之后各段独立成败：读落盘文件那段极快（几乎必成），慢的那段失败也只损失那一段。
+        val filesScript = buildString {
             // ★ 2026-10-07 新增：先读「模块启动摘要」—— logcat 缓冲只保 ~10 分钟，模块刚起来那几条
             //   （模块已加载 / 注入成功 / 钩子安装 / 上限闸门）届时**必已被挤掉**，
             //   只有这份落盘文件能证明「模块到底有没有跑起来」。放在最前面，因为它最要紧。
@@ -380,7 +407,24 @@ internal object DiagnosticsCollect {
                 TAIL_BOOT_REPORT,
                 "（还没有这个文件 —— 模块本次启动后还没写入，或模块根本没加载）",
             )
-            append("echo;echo '--- 模块日志（按 TAG 过滤，只看系统界面进程，尾部 $TAIL_MODULE_LOG 行） ---';")
+            // ★ 2026-10-07：自检**默认是关的**（`hyperplus_selfcheck` 未设 ⇒ 连 files 目录都不存在），
+            //   所以「文件不在」是正常状态。裸 `cat` 会吐 `No such file or directory`，看起来像出故障。
+            //   ★ 2026-10-07：跟着「落盘文件」这一路走（同属"读文件"，与 logcat 那半无关）。
+            append("echo;echo '--- 模块自检报告（$SELF_CHECK_NAME） ---';")
+            catFirst(
+                SELF_CHECK_NAME,
+                TAIL_SELF_CHECK,
+                "（没有这个文件 —— 自检默认关闭，属正常状态）",
+                "  要看自检：adb shell settings put global hyperplus_selfcheck 1，然后重启系统界面。",
+            )
+        }
+        out += DiagnosticsReport.raw(
+            "模块落盘文件（借 root；启动摘要 / 自检）",
+            runCatching { RootShell.runRaw(filesScript) }.getOrNull() ?: ROOT_SCRIPT_FAILED,
+        )
+
+        val script = buildString {
+            append("echo '--- 模块日志（按 TAG 过滤，只看系统界面进程，尾部 $TAIL_MODULE_LOG 行） ---';")
             // ★ 2026-10-07：HyperPlusPrefs / HyperPlusScreenForm / HyperPlusRoot 这三个 TAG **App 侧也在用**
             //   ⇒ 不加 uid 限定会把 App 进程的行混进来（与上一段重复）。这里按 SystemUI 的 uid 过滤。
             //   uid **现查现用**；查不到就**退回不过滤** —— 宁可多给，也不能因为查不到 uid 把模块日志整段丢掉。
@@ -413,30 +457,22 @@ internal object DiagnosticsCollect {
             append("echo \"### \$(basename \$f)\"; head -n 26 \$f; echo; done;")
             append("echo '--- dropbox 目录概览（最近 20 条）---';")
             append("ls -lt /data/system/dropbox/ 2>&1 | head -n 20;")
-            // ★ 2026-10-07：自检**默认是关的**（`hyperplus_selfcheck` 未设 ⇒ 连 files 目录都不存在），
-            //   所以「文件不在」是正常状态。裸 `cat` 会吐 `No such file or directory`，看起来像出故障。
-            append("echo;echo '--- 模块自检报告（$SELF_CHECK_NAME） ---';")
-            catFirst(
-                SELF_CHECK_NAME,
-                TAIL_SELF_CHECK,
-                "（没有这个文件 —— 自检默认关闭，属正常状态）",
-                "  要看自检：adb shell settings put global hyperplus_selfcheck 1，然后重启系统界面。",
-            )
             // ★ 2026-10-07：改按**时间倒序**取尾 —— 原先 `ls -l | tail` 是字典序，
             //   tombstone 编号跨位（9 与 10）时取到的不是最新的。
             append("echo;echo '--- tombstones（有文件 = native 崩溃；按时间倒序，最新在前） ---';")
             append("ls -lt /data/tombstones/ 2>&1 | head -n 12;")
             append("echo;echo '--- 关键属性 ---';")
             append("getprop | grep -iE 'hyperplus|multiple.split' 2>&1;")
-            append("echo;echo '--- SystemUI 的 WRITE_SETTINGS ---';")
-            append("dumpsys package com.android.systemui 2>&1 | grep -A2 WRITE_SETTINGS | head -n 12;")
+            // ⛔ 别把 `dumpsys package com.android.systemui` **加回这里**：本段开头已经跑过一次
+            //   （取 uid 用，那次是必须的），而 `dumpsys package` 在真机上要好几秒 ——
+            //   原先这第二次（只为看 WRITE_SETTINGS）是把整条脚本拖过 15 秒上限的嫌疑之一。
             append("echo;echo '--- 系统分屏上限 ---';")
             append("settings get global miui_multiple_split_resolved_max_stages 2>&1;")
         }
         val text = runCatching { RootShell.runRaw(script) }.getOrNull()
         out += DiagnosticsReport.raw(
             "模块日志（借 root，系统界面进程）",
-            text ?: "（su 执行失败 —— 可能授权被拒或超时）",
+            text ?: ROOT_SCRIPT_FAILED,
         )
         return out
     }
@@ -489,26 +525,49 @@ internal object DiagnosticsCollect {
     }
 
     /**
-     * 跑一条**非 root** 的公开命令（`getprop`），带超时。
+     * 一条 shell 命令的结果：**文本** ＋ 没拿到时**为什么**（[why] 为 null 表示拿到了）。
+     *
+     * ★ 2026-10-07 新增。此前这个函数的返回值只有"有内容 / null"两态，于是
+     *   **「超过 5 秒没返回」与「命令本来就没输出」长得一模一样** ⇒ 报告里只能写一句
+     *   「读不到 —— 本机可能限制了应用读 logcat」，把**超时**说成了**权限限制**。
+     *   issue #2 的日志里就有这句话（真因是 `logcat -d` 在这台机器上 5 秒没返回）。
+     */
+    private data class ShellOut(val text: String?, val why: String?)
+
+    /**
+     * 跑一条**非 root** 的公开命令（`getprop` / `logcat`），带超时，**并保留失败原因**。
      *
      * ⚠️ `getprop` 本身是 `/system/bin` 下的公开可执行文件，普通应用跑它**不需要 root**。
      *   （⛔ 别改成反射 `android.os.SystemProperties` —— 那是 hidden API，随时可能被拦。）
-     *
-     * @return null = 跑不动或没输出
      */
-    private fun shell(cmd: Array<String>): String? = runCatching {
+    private fun shellOut(cmd: Array<String>): ShellOut = runCatching {
         val p = ProcessBuilder(*cmd).redirectErrorStream(true).start()
         try {
             if (!p.waitFor(SHELL_TIMEOUT_MS, TimeUnit.MILLISECONDS)) {
                 p.destroyForcibly()
-                return@runCatching null
+                return@runCatching ShellOut(
+                    null,
+                    "超过 ${SHELL_TIMEOUT_MS / 1000} 秒没返回（已强制结束）",
+                )
             }
-            p.inputStream.bufferedReader().use { it.readText() }.trim().takeIf { it.isNotEmpty() }
+            val text = p.inputStream.bufferedReader().use { it.readText() }.trim()
+            val code = p.exitValue()
+            when {
+                code != 0 -> ShellOut(
+                    text.takeIf { it.isNotEmpty() },
+                    "命令退出码 $code（本机不让应用跑它，或它不认这组参数）",
+                )
+                text.isEmpty() -> ShellOut(null, "命令成功，但没有任何输出")
+                else -> ShellOut(text, null)
+            }
         } catch (t: Throwable) {
             p.destroyForcibly()
             throw t
         }
-    }.getOrNull()
+    }.getOrElse { ShellOut(null, "起不了子进程：${it.javaClass.simpleName}") }
+
+    /** 只要文本的调用方用这个（拿不到文本时返回 null，原因见 [shellOut]） */
+    private fun shell(cmd: Array<String>): String? = shellOut(cmd).text
 
     /** 读一个系统属性（走 `getprop`，见 [shell]） */
     private fun prop(key: String): String? =

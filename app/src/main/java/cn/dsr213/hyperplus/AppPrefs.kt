@@ -640,6 +640,16 @@ object AppPrefs {
     private val _splitThermalGuardOff = MutableStateFlow(false)
 
     /**
+     * ★★ **「轻折加分屏」的总开关**（默认 false）。
+     *
+     * 语义与它为什么必须存在（issue #1 那次报障）见 [PrefsBridge.SPLIT_TRIGGER_ON]。
+     * ★ 引擎侧**直接读这个流**（同 [_splitThermalGuardOff] 那条路：`SplitTrigger` 用
+     *   `AppPrefs.xxx.value` 取值）—— 所以⛔ 两条读盘路径[reloadFromPrefs] /
+     *   [applyFromModulePrefs] 都得灌，漏一条的症状是「界面改了、引擎没跟上」，且**不报错**。
+     */
+    private val _splitTriggerOn = MutableStateFlow(false)
+
+    /**
      * 温度上限的**取值边界与默认值** —— ⛔ 三处算术都以这里为唯一真值。
      *
      * ★ [THERMAL_LIMIT_C_DEFAULT] = **47**：不是我们拍的，是**照抄系统的出厂值**
@@ -915,6 +925,14 @@ object AppPrefs {
      */
     val splitThermalGuardOff: StateFlow<Boolean> = _splitThermalGuardOff.asStateFlow()
 
+    /**
+     * ★★ 是否开启**「轻折加分屏」**（默认 false ⇒ 关）。
+     *
+     * ★ 界面开关读它；引擎侧（`SplitTrigger`）也读**同一个流** —— 与 adb 调试档位
+     *   [PrefsBridge.SPLIT_TRIGGER] 取或，二者任一为真即启用。
+     */
+    val splitTriggerOn: StateFlow<Boolean> = _splitTriggerOn.asStateFlow()
+
     /** 半自动按钮等待时长（毫秒，1000~60000）。界面滑条读它，引擎侧由配置通道灌入 */
     val hintMs: StateFlow<Int> = _hintMs.asStateFlow()
 
@@ -1107,6 +1125,7 @@ object AppPrefs {
                 .putString(PrefsBridge.SPLIT_UNFOLD_DIR, _splitUnfoldDir.value.name)
                 .putInt(PrefsBridge.SPLIT_THERMAL_LIMIT_C, _splitThermalLimitC.value)
                 .putBoolean(PrefsBridge.SPLIT_THERMAL_GUARD_OFF, _splitThermalGuardOff.value)
+                .putBoolean(PrefsBridge.SPLIT_TRIGGER_ON, _splitTriggerOn.value)
                 .putInt(PrefsBridge.HINT_MS, _hintMs.value)
             // 白名单落成**单个字符串**（`\n` 分隔），理由见 [AppWhitelist.encode]。
             // 一份名单 × 两份（增 / 减）= 2 个键。
@@ -1167,6 +1186,9 @@ object AppPrefs {
             )
         _splitThermalGuardOff.value =
             p.getBoolean(PrefsBridge.SPLIT_THERMAL_GUARD_OFF, false)
+        // ★★ 「轻折加分屏」总开关（2026-10-07）—— 同上，**引擎侧要读它**
+        //   （`SplitTrigger` 用它 + adb 档位取或决定挂不挂 hook）⇒ 两条读盘路径成对灌。
+        _splitTriggerOn.value = p.getBoolean(PrefsBridge.SPLIT_TRIGGER_ON, false)
         // 读的时候也归一一次：老版本写进去的（如 7927）/ 文件被手改过的值都可能越界或非整秒
         _hintMs.value = snapHintMs(p.getInt(PrefsBridge.HINT_MS, HINT_MS_DEFAULT))
         _hintTestReq.value = p.getString(PrefsBridge.HINT_TEST, null).orEmpty()
@@ -1493,6 +1515,10 @@ object AppPrefs {
             )
         _splitThermalGuardOff.value =
             p.getBoolean(PrefsBridge.SPLIT_THERMAL_GUARD_OFF, false)
+        // ★★ 「轻折加分屏」总开关（2026-10-07）—— **这一条才是功能性的那条**：
+        //   引擎进程靠它决定挂不挂 WMShell 的 capture hook，以及 `onTrigger` 放不放行。
+        //   ⚠️ 与 [reloadFromPrefs] 那条**成对**，漏一条 = 界面打开了开关、引擎那边还是关的。
+        _splitTriggerOn.value = p.getBoolean(PrefsBridge.SPLIT_TRIGGER_ON, false)
         // 读的时候也归一一次：老版本写进去的（如 7927）/ 文件被手改过的值都可能越界或非整秒
         _hintMs.value = snapHintMs(p.getInt(PrefsBridge.HINT_MS, HINT_MS_DEFAULT))
         // ★ 预览请求同样要灌进内存流 —— 引擎侧 `collect` 它才会弹按钮。
@@ -2082,6 +2108,26 @@ object AppPrefs {
         _splitThermalGuardOff.value = v
         prefs?.edit()?.putBoolean(PrefsBridge.SPLIT_THERMAL_GUARD_OFF, v)?.apply()
         Log.i(TAG, "多分屏高温保护已${if (v) "关闭（用户确认过）" else "恢复"}")
+    }
+
+    /**
+     * ★★★ 开 / 关**「轻折加分屏」**（2026-10-07）。
+     *
+     * ============================ 为什么这一步是必须的 ============================
+     * 这个功能此前只有 `Settings.Global` 里那条由 adb 设的三档键，**界面上没有入口**
+     * ⇒ 对用户恒为关（issue #1 的完整复盘见 [PrefsBridge.SPLIT_TRIGGER_ON]）。
+     * 本函数就是那个入口 —— 打开它，引擎侧的 [SplitTrigger] 才会挂 capture hook 并放行判定。
+     *
+     * ★ 落盘之后**不需要任何额外动作**：`OnSharedPreferenceChangeListener` 会自动
+     *   [scheduleConfigPush] 把新快照推给引擎（同 [setSplitUnfoldDir] 那条路）。
+     * ⚠️ 引擎第一次收到"开"时为**补挂 hook**（它启动时若还是关的，就不会挂）——
+     *   那条补挂逻辑在 `SplitTrigger` 里，⛔ 别在这里代做。
+     */
+    fun setSplitTriggerOn(v: Boolean) {
+        if (_splitTriggerOn.value == v) return
+        _splitTriggerOn.value = v
+        prefs?.edit()?.putBoolean(PrefsBridge.SPLIT_TRIGGER_ON, v)?.apply()
+        Log.i(TAG, "轻折加分屏已${if (v) "打开" else "关闭"}")
     }
 
     /**

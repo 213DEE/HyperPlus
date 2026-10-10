@@ -126,6 +126,14 @@
     <string name="function_split_title">分屏增强</string>
     <string name="function_split_summary">2分屏展开方向：%1$s</string>
     <string name="split_title">分屏增强</string>
+    <!-- ================================================ 轻折加分屏（2026-10-07） -->
+    <!-- ★★★ 这一组是 issue #1 的修复：该功能此前只有一条 adb 设的 Settings.Global 档位键、
+         界面上没有入口 ⇒ 对用户**恒为关**，判定链跑得再对也停在「未执行」。
+         ⛔ 别让开关改成只写 Settings.Global —— App 进程写不了它（要签名级权限），
+            真值路径必须是 App prefs（见 PrefsBridge.SPLIT_TRIGGER_ON）。 -->
+    <string name="split_trigger_section">轻折加分屏</string>
+    <string name="split_trigger_title">轻折加分屏</string>
+    <string name="split_trigger_summary">轻折一下机身，当前应用挤成半屏、再多出一格分屏。切到别的应用后依然生效。</string>
     <string name="split_dir_section">2分屏展开方向</string>
     <string name="split_dir_note">轻折一下多开一格分屏时，当前应用留在哪一侧。</string>
     <string name="split_dir_left">朝左</string>

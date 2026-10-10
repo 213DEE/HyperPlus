@@ -372,6 +372,16 @@ internal object SplitTrigger {
      */
     private var observeOnly = false
 
+    /**
+     * capture hook 是否**已经尝试挂过**（2026-10-07 新增）。
+     *
+     * ★ 为什么需要它：界面开关可能在引擎起来**之后**才被打开（见 [watchUiSwitch]），
+     *   那条补挂路径必须是**幂等**的 —— 重复 hook 同一个方法会出乱子。
+     * ⚠️ 失败**不重置**：`installCapture` 内部是多条 hook，部分成功时重试只会重复挂
+     *   ⇒ 宁可"一次失败就本进程不再试"（有日志留痕），也不赌重复 hook 的后果。
+     */
+    @Volatile private var captureDone = false
+
     /** 轨迹日志限流：角度至少变了这么多、或静默这么久，才打一行 */
     private var lastLoggedAngle = Float.NaN
     private var lastLoggedMs = 0L
@@ -394,7 +404,13 @@ internal object SplitTrigger {
             return
         }
         hostCtxRef = hostCtx
-        val mode = mode(hostCtx)
+        // ★★★ 2026-10-07 改档位口径：**界面开关**（[PrefsBridge.SPLIT_TRIGGER_ON]，走 App prefs）
+        //   与 **adb 调试档位**（[KEY] = `Settings.Global`，0/1/2）**取或**。
+        //   原因见 [PrefsBridge.SPLIT_TRIGGER_ON] —— 此前只有后者，而 App 写不了
+        //   `Settings.Global` ⇒ 对用户恒为 0，功能等于不存在（issue #1）。
+        val dbg = dbgMode(hostCtx)
+        val uiOn = uiSwitchOn()
+        val mode = if (uiOn) 2 else dbg
         observeOnly = mode == 1
 
         val modeTag = when (mode) {
@@ -402,7 +418,8 @@ internal object SplitTrigger {
             2 -> " = 真动作"
             else -> " = 关闭（只装传感器，不进分屏）"
         }
-        Log.i(TAG, "===== 分屏触发器开始安装（模式=$mode$modeTag）=====")
+        val modeSrc = if (uiOn) "来源=界面开关" else "来源=adb 调试键（$KEY=$dbg）"
+        Log.i(TAG, "===== 分屏触发器开始安装（档位=$mode$modeTag；$modeSrc）=====")
 
         // ① 注册折角传感器 —— **无条件**（理由见类注释那条更正：注册成本可忽略，
         //   但它在 0 档**不构成任何能力** —— 没有控制器、没有 hook，判定成立也动不了屏幕）
@@ -417,11 +434,18 @@ internal object SplitTrigger {
         runCatching { logThermalOnChange() }
             .onFailure { Log.e(TAG, "订阅高温配置失败（已吞掉）", it) }
 
+        // ★★★ 2026-10-07：界面开关可能在**本函数跑完之后**才被打开（装机后模块先起、
+        //   用户后开；或配置快照还没到）⇒ 订阅它、一旦打开就**补挂** hook。
+        //   ⛔ 不能只靠这一刻读一次 —— 那等于要求用户"先把开关打开，再重启系统界面"。
+        watchUiSwitch(module, classLoader)
+
         if (mode <= 0) {
             Log.i(
                 TAG,
-                "分屏触发器处于关闭档（$KEY=0）：已装好折角传感器，" +
-                    "**不挂任何 hook、不会进分屏**（要开：adb shell settings put global $KEY 1 然后重启系统界面）",
+                "分屏触发器处于关闭档（界面开关=关 且 $KEY=$dbg）：已装好折角传感器，" +
+                    "**不挂任何 hook、不会进分屏**" +
+                    "（要开：App →「分屏增强」→ 打开「轻折加分屏」；" +
+                    "或 adb shell settings put global $KEY 2 然后重启系统界面）",
             )
             installed = true
             Log.i(TAG, "===== 分屏触发器安装完成（关闭档）=====")
@@ -429,10 +453,7 @@ internal object SplitTrigger {
         }
 
         // ② 捕获 WMShell 实例（唯一"脏活"，见方案 §4 方案 A）—— 只有真要用时才挂
-        val ok = runCatching { installCapture(module, classLoader) }
-            .onFailure { Log.e(TAG, "捕获控制器失败（已吞掉）", it) }
-            .getOrDefault(false)
-        if (!ok) Log.w(TAG, "⚠️ 没能捕获控制器 ⇒ 本功能无法动作（观察日志仍会输出）")
+        captureOnce(module, classLoader)
 
         installed = true
         Log.i(TAG, "===== 分屏触发器安装完成 =====")
@@ -697,9 +718,51 @@ internal object SplitTrigger {
                 AppPrefs.splitThermalGuardOff.collect { off ->
                     Log.i(
                         TAG,
-                        if (off) "🌡 过热保护已被用户关闭（闸门 + 高温动作都拆掉）"
-                        else "🌡 过热保护已恢复（上限 ${AppPrefs.splitThermalLimitC.value}°C）",
+                            if (off) "🌡 过热保护已被用户关闭（闸门 + 高温动作都拆掉）"
+                            else "🌡 过热保护已恢复（上限 ${AppPrefs.splitThermalLimitC.value}°C）",
                     )
+                }
+            }
+        }
+    }
+
+    /**
+     * 挂 capture hook —— **幂等**（见 [captureDone] 里"失败为什么不重置"）。
+     *
+     * ★ 拆出来是为了让"引擎起来之后用户才打开开关"这条路径也能补挂（见 [watchUiSwitch]）。
+     */
+    private fun captureOnce(module: XposedInterface, classLoader: ClassLoader?) {
+        if (captureDone) return
+        captureDone = true
+        val ok = runCatching { installCapture(module, classLoader) }
+            .onFailure { Log.e(TAG, "捕获控制器失败（已吞掉）", it) }
+            .getOrDefault(false)
+        if (!ok) Log.w(TAG, "⚠️ 没能捕获控制器 ⇒ 本功能无法动作（观察日志仍会输出）")
+    }
+
+    /**
+     * ★★★ **盯住界面上的「轻折加分屏」开关，打开的那一刻补挂 hook**（2026-10-07 新增）。
+     *
+     * ============================ 为什么必须有这一条 ============================
+     * `install()` 只在模块加载时跑一次（`HyperPlusModule.doBoot`，开机后约 4 秒）。而开关是
+     * **用户随时可以拨的**，两种时序都会出现：
+     *   · 装机后模块先起 ⇒ 那一刻开关还是关的 ⇒ 不挂 hook；
+     *   · 用户随后在 App 里打开开关。
+     * 没有本函数的话，第二条只会让 `onTrigger` 的闸门放行，而 `controllerOrNull()` 仍是 null
+     * —— 用户折一下，日志说"没有控制器实例 ⇒ 放弃"，**看起来还是坏的**。
+     * ⇒ 必须补挂。订阅 `StateFlow` 会**重放当前值**，所以"启动时就是开的"也走同一条路（幂等）。
+     *
+     * ⚠️ collect 跑在 [logScope]（`Dispatchers.Default`，⛔ 不是主线程）——
+     *   hook 在任意线程挂是安全的（`installCapture` 本来就是后台线程调的）。
+     */
+    private fun watchUiSwitch(module: XposedInterface, classLoader: ClassLoader?) {
+        logScope.launch {
+            runCatching {
+                AppPrefs.splitTriggerOn.collect { on ->
+                    if (!on) return@collect
+                    if (captureDone) return@collect
+                    Log.i(TAG, "★ 界面开关「轻折加分屏」已打开 ⇒ 补挂分屏 hook（不必重启系统界面）")
+                    captureOnce(module, classLoader)
                 }
             }
         }
@@ -1116,8 +1179,19 @@ internal object SplitTrigger {
         val pos = posOf(dir)
         val taskIdNow = focusedTaskId()
 
-        if (mode(host) < 2) {
-            Log.i(TAG, "（只观察模式）方向=${dir ?: "?"} ⇒ pos=$pos；taskId=$taskIdNow —— 未执行")
+        // ★★★ 2026-10-07：闸门口径与 [install] 保持一致 —— **界面开关**与 **adb 调试档位**取或。
+        //   ⚠️ 措辞必须写**真实档位**。旧版不论哪一档都打印「（只观察模式）」，而 0 档的真实
+        //      含义是**关闭** ⇒ issue #1 的用户看到"只观察"以为只是没开观察开关，
+        //      于是反复折了 8 次（日志里 8 次「✗ 判为要合上」+ 1 次「✅ 轻折回弹」全停在这一句）。
+        val uiOn = uiSwitchOn()
+        val dbg = dbgMode(host)
+        if (!uiOn && dbg < 2) {
+            val why = if (dbg == 1) {
+                "只观察档（adb $KEY=1）"
+            } else {
+                "未启用（界面开关=关，adb $KEY=$dbg）"
+            }
+            Log.i(TAG, "（$why）方向=${dir ?: "?"} ⇒ pos=$pos；taskId=$taskIdNow —— 未执行")
             return
         }
         val ctrl = controllerOrNull() ?: run {
@@ -1856,11 +1930,27 @@ internal object SplitTrigger {
         return null
     }
 
-    // ================================================================ 配置
+    // ================================================================ 档位（两个来源，取或）
 
-    private fun mode(ctx: Context): Int = runCatching {
+    /**
+     * **adb 调试档位** —— `Settings.Global` 的 [KEY]（0 关 / 1 只观察 / 2 真动作）。
+     *
+     * ⚠️ 它**只是调试通道**：App 进程写不了 `Settings.Global`（要 `WRITE_SECURE_SETTINGS`），
+     *   所以对用户它恒为 0。用户的那一档见 [uiSwitchOn]（2026-10-07 更正，见 [PrefsBridge.SPLIT_TRIGGER_ON]）。
+     */
+    private fun dbgMode(ctx: Context): Int = runCatching {
         Settings.Global.getInt(ctx.contentResolver, KEY, 0)
     }.getOrDefault(0)
+
+    /**
+     * **界面上的「轻折加分屏」开关** —— 真值路径：App prefs → 广播快照 → 引擎镜像
+     * （`AppPrefs.splitTriggerOn`，与「高温保护」那两个开关走的是**同一条**通道）。
+     *
+     * ⚠️ `runCatching` 是必须的：这里跑在传感器回调 / 配置镜像线程上，读不到就按"关"处理，
+     *   ⛔ 绝不能让一个读取失败把宿主的传感器线程带走。
+     */
+    private fun uiSwitchOn(): Boolean =
+        runCatching { AppPrefs.splitTriggerOn.value }.getOrDefault(false)
 
     private fun fmt(v: Float) = String.format(java.util.Locale.US, "%.1f", v)
 }
