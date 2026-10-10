@@ -1,6 +1,6 @@
 # HyperPlus
 
-**让屏幕方向跟着你的脸转，而不是跟着重力转。**
+**给小米 18 Fold 补上它缺的那几项实用功能。**
 
 ![License](https://img.shields.io/badge/license-AGPL--3.0-blue)
 ![Platform](https://img.shields.io/badge/platform-Android-3ddc84)
@@ -13,9 +13,9 @@
 
 ## 中文
 
-睡前侧躺着刷手机，手机是侧着拿的，重力却告诉系统"该横屏了"——屏幕就转到你根本不想看的方向。
+折起来是手机、展开是平板，但系统给的那几项功能，用起来总差一口气：侧躺着刷，屏幕偏要横过来；想多开几个应用，格子上限卡在 6 个；分屏想放哪边、温度到几度收手，都改不了。
 
-系统的自动旋转**只认重力，不认你的脸**。HyperPlus 让屏幕方向由**人脸相对设备的朝向**决定。
+HyperPlus 是一个 LSPosed 模块，**一项一项把这些补上** —— 现在有旋转和分屏两组，后面还会加。引擎住在系统界面进程里，改完即时生效、跨重启保留。
 
 > 📌 这篇 README 只讲三件事：**① 有哪些功能 ② 需要什么运行环境 ③ 出问题怎么导出日志、怎么提 issue。**
 
@@ -130,9 +130,11 @@ adb shell ls -l /data/tombstones/                                         # 有�
 
 ## English
 
-Anyone who has doom-scrolled while lying on their side knows this: the phone is sideways in your hand, but gravity tells the system "this should be landscape", and the screen flips to an orientation you never wanted.
+**Fills in the missing quality-of-life features on the Xiaomi 18 Fold.**
 
-Auto-rotate only respects **gravity**, not **your face**. HyperPlus drives screen orientation from **the orientation of your face relative to the device**.
+Anyone who has doom-scrolled while lying on their side knows this: the phone is sideways in your hand, but gravity tells the system "this should be landscape", and the screen flips to an orientation you never wanted. Want more than a couple of apps at once and the split limit stops at six — and you cannot choose which side an app stays on, or at what temperature it stops adding panes.
+
+HyperPlus is an LSPosed module that **adds these back one at a time** — today a rotation group and a split-screen group, with more to come. The engine lives inside the SystemUI process, so changes take effect immediately and survive a reboot.
 
 > 📌 This README covers exactly three things: **① what it can do ② what it needs to run ③ how to export logs and file an issue.**
 
