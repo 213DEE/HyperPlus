@@ -13,56 +13,9 @@
 
 ## 中文
 
-HyperPlus 是一个 LSPosed 模块，为小米 18 Fold 增加系统本身没有的实用功能，分旋转和分屏两组。引擎常驻系统界面进程，App 只做配置界面。
+HyperPlus 是一个 LSPosed 模块，为小米 18 Fold 增加系统本身没有的实用功能。引擎常驻系统界面进程，App 只做配置界面。
 
-**依赖**：root ＋ LSPosed（libxposed API 101+）· HyperOS · Android 11+
-
-### 功能
-
-#### 旋转
-
-只在展开后的内屏生效，不挑机型。
-
-| 功能 | 说明 | 需要 root |
-|---|---|---|
-| **人脸方向跟随旋转** | 前摄看一眼你脸朝哪，屏幕就朝哪。**首次使用要先到「实验功能」把开关打开** | ❌ |
-| **半自动旋转（点击确认）** | 转手机时右下角弹出按钮，**点一下才转**；不开摄像头，最省电 | ❌ |
-| **跟随系统** | 本模块完全不介入，用系统自带的自动旋转 | ❌ |
-| **暗光降级** | 光线太暗或认不出脸时自动改成「点一下才转」，光线恢复后自动切回 | ❌ |
-| **每应用单独挑旋转方式** | 逐个应用指定：跟随全局 / 跟随系统 / 人脸 / 半自动；没指定的跟随全局那一档 | ❌ |
-| **旋转应用名单** | 名单里的应用（游戏、长视频）不弹按钮、不改方向 | ❌ |
-| **控制中心快捷开关** | 三档循环切换，不用打开 App | ❌ |
-| **方向** | 展开后内屏保持的方向，四选一（按摄像头位置选） | ⚠️ **需要** |
-
-#### 分屏
-
-只在展开后的内屏生效，依赖 HyperOS 私有实现，非小米机型不生效。
-
-| 功能 | 说明 | 需要 root |
-|---|---|---|
-| **轻折加分屏** | 轻折一下机身，把当前应用挤成半屏、再多出一格分屏；当前应用留在哪一侧可选（朝左 / 朝右）。**默认关闭 —— 到「分屏增强」页把开关打开** | ❌ |
-| **分屏应用名单** | 名单里的应用（默认＝市面上常见游戏）折一下也不分屏 | ❌ |
-| **高温保护可配置** | 增加分屏格子的温度上限可调（默认 47°C，是出厂设定值），过热保护也可以整个关掉 | ❌ |
-| **提高分屏上限** | 打开后折叠时最多同时摆 8 个应用（系统默认 6 个）；改完要重启一次系统界面 | ⚠️ **需要**（写开关） |
-| **分屏几何探针** | 排查 7/8 格异常用的只读日志探针，默认关闭 | ❌ |
-
-#### 通用
-
-| 功能 | 说明 | 需要 root |
-|---|---|---|
-| **常驻生效** | 引擎住在系统界面进程里 —— 回桌面 / 锁屏 / App 被强杀后仍然生效 | ❌ |
-| **不常开摄像头** | 靠朝向传感器唤醒，一次只采约 1 秒，采完立刻释放 | ❌ |
-| **绝不和别的 App 抢摄像头** | 四道闸门保证：正在扫码 / 视频通话时本模块自动让位 | ❌ |
-| **外屏交给系统** | 增强只作用在展开后的内屏；合上后本模块不介入，屏幕仍由系统决定 | ❌ |
-| **权限管理页** | 模块 / root / 修改系统设置三项自检，缺哪项点哪一行去授权，可随时重新检测 | ❌ |
-| **导出诊断日志** | 一键导出设备信息、模块状态与运行日志（没 root 也能导出） | ❌ |
-| **重启系统界面** | 设置页一键重启状态栏与导航栏，改了设置没生效时用 | ⚠️ **需要** |
-| **界面多语言** | 简体中文 / 繁体中文 / English，跟随系统或手动指定 | ❌ |
-| **更新提醒** | 启动时检查 GitHub Release 是否有新版本 | ❌ |
-
-### 需要什么运行环境
-
-**门槛写在最前面，免得白装：需要 root ＋ LSPosed。**
+### 运行环境
 
 | 需要 | 具体 |
 |---|---|
@@ -72,7 +25,7 @@ HyperPlus 是一个 LSPosed 模块，为小米 18 Fold 增加系统本身没有�
 | CPU | **arm64-v8a** —— APK 只带这一套原生库，**纯 32 位机型直接装不上** |
 | 摄像头 | **必须有前置摄像头** |
 | 空间 | APK 约 41 MB，装机后还会解出约 8.6 MB 原生库 |
-| 系统 | **分屏那一组依赖小米 HyperOS**；旋转那一组不限机型。除此之外不需要 GMS、不需要联网下载模型（人脸模型打在 APK 里） |
+| 系统 | **分屏功能依赖小米 HyperOS**，旋转功能不限机型。不需要 GMS，不需要联网下载模型（人脸模型打在 APK 里） |
 
 **模块作用域只需要勾一项：`com.android.systemui`。**
 
@@ -81,11 +34,49 @@ HyperPlus 是一个 LSPosed 模块，为小米 18 Fold 增加系统本身没有�
 
 **不需要额外权限。** 相机与「修改系统设置」都由系统界面进程自带的权限承担；半自动模式的悬浮按钮同理（系统界面是 system uid，不需要「显示在其他应用上层」）。装好后无需授予任何权限即可使用。
 
-> ⚠️ 唯一的例外是上面表里标了 **要 root** 的三项（方向 / 提高分屏上限 / 重启系统界面）。不用它们就完全不需要 root，带 root 字样的按钮不去点它即可。
+> ⚠️ 唯一的例外是下面标了 **需要 root** 的三项。不用它们就完全不需要 root，带 root 字样的按钮不去点它即可。
 
 > ⚠️ **代价，也先说清楚**：本模块**会把代码注入系统界面进程**并在其中常驻，还会**修改系统的显示方向设置**（正常退出时还原；进程被强杀后下次启动会自动修复）。而「需要 root 与 LSPosed」意味着要**解锁 Bootloader**，会让设备失去官方保修，也可能影响部分银行 / 支付类应用。
 
+**装完就不用管。** 引擎住在系统界面进程里，不需要给本应用加自启动或省电白名单 —— 退到后台、锁屏、划掉、清后台都不影响，重启手机后也自动恢复。
+
 > 📌 目前只在**一台**设备上验证过（小米折叠屏 / HyperOS）。换机型请在「方向」卡里核对展开方向。
+
+### 功能
+
+#### 旋转
+
+**三种转屏方式，随时切换：**
+
+| | 怎么转 |
+|---|---|
+| **人脸** | 看你的脸朝哪边，屏幕就转到哪边。适合躺着、侧着用 |
+| **半自动** | 转动手机后，右下角弹出一个按钮，点一下才转。不碰摄像头，最省电 |
+| **跟随系统** | 完全交给系统的「自动旋转」，模块不插手 |
+
+**在此基础上还能：**
+
+| 功能 | 需要 root |
+|---|---|
+| 每个应用单独挑一种转屏方式（没挑的跟随全局） | |
+| 光线太暗或看不到脸时，自动改成"点一下才转" | |
+| 指定哪些应用不要干预（游戏默认在里面，玩的时候不抢资源） | |
+| 转屏按钮停留多久（1–60 秒可调） | |
+| 控制中心快捷开关，单击循环切换三种方式 | |
+| 每次展开内屏时的默认朝向 | ⚠️ 需要 |
+
+#### 分屏
+
+| 功能 | 需要 root |
+|---|---|
+| 轻折一下机身，当前应用挤成半屏，再多出一格分屏 | |
+| 分屏展开时，当前应用留在左半边还是右半边 | |
+| 指定哪些应用不要被分屏（游戏默认在里面） | |
+| 分屏的温度上限（默认 47°C）与过热保护开关 | |
+| 最多同时摆 8 个应用（系统默认 6 个） | ⚠️ 需要 |
+
+> 「轻折加分屏」默认关闭，到「实验功能」把它打开。
+> 「最多同时摆 8 个应用」改完要重启一次系统界面。
 
 ### 遇到问题：怎么导出日志、怎么提 issue
 
@@ -127,56 +118,9 @@ adb shell ls -l /data/tombstones/                                         # 有�
 
 ## English
 
-HyperPlus is an LSPosed module that adds features the Xiaomi 18 Fold does not ship with, in two groups: rotation and split screen. The engine is resident in the SystemUI process; the app is a configuration UI only.
+HyperPlus is an LSPosed module that adds features the Xiaomi 18 Fold does not ship with. The engine is resident in the SystemUI process; the app is a configuration UI only.
 
-**Requires**: root + LSPosed (libxposed API 101+) · HyperOS · Android 11+
-
-### Features
-
-#### Rotation
-
-Inner screen only (when unfolded). Not model-specific.
-
-| Capability | What it means | Root? |
-|---|---|---|
-| **Face-driven rotation** | The front camera takes one look at where your face points, and the screen follows. **Enable it under "Experimental" first** | ❌ |
-| **Semi-auto (tap to confirm)** | Turn the phone and a button appears in the corner; **the screen rotates only when you tap it**. No camera, lowest power | ❌ |
-| **Follow system** | This module stays out of the way and uses the system auto-rotate toggle | ❌ |
-| **Low-light fallback** | When it is too dark or no face is visible it switches to tap-to-rotate, then switches back once there is enough light | ❌ |
-| **Per-app rotation mode** | Pick a mode per app: follow global / follow system / face / semi-auto; apps you leave unset follow the global mode | ❌ |
-| **Rotation app list** | Apps on the list (games, long videos) get no button and no rotation | ❌ |
-| **Quick Settings tile** | Cycle the three modes without opening the app | ❌ |
-| **Orientation** | Pick the orientation the inner screen unfolds into (one of four) | ⚠️ **Yes** |
-
-#### Split screen
-
-Inner screen only (when unfolded). Relies on HyperOS private implementations; does nothing on non-Xiaomi devices.
-
-| Capability | What it means | Root? |
-|---|---|---|
-| **Fold to add a split** | A light fold squeezes the current app into half the screen and adds one more pane; you choose which side the current app stays on (left / right). **Off by default — turn the switch on under "Split screen enhancements"** | ❌ |
-| **Split app list** | Apps on the list (common games by default) are never split when you fold | ❌ |
-| **Configurable overheat guard** | The temperature limit for adding panes is adjustable (default 47 °C, the factory value) and the guard can be turned off entirely | ❌ |
-| **Raise the split limit** | Once on, up to 8 apps can be split while folded (the system default is 6); a SystemUI restart is needed | ⚠️ **Yes** (to write the switch) |
-| **Split geometry probe** | Read-only log probe for diagnosing 7/8-pane anomalies; off by default | ❌ |
-
-#### General
-
-| Capability | What it means | Root? |
-|---|---|---|
-| **Resident engine** | The engine lives inside the SystemUI process — still working after returning home, locking the screen, or force-stopping the app | ❌ |
-| **Camera is never kept open** | A hardware orientation sensor wakes a single ~1 s burst, then the camera is released | ❌ |
-| **Never competes for the camera** | Four gates: while you scan a code or take a video call, this module steps aside | ❌ |
-| **Outer screen left to the system** | Enhancements apply only on the unfolded inner screen; once folded the module stays out of the way | ❌ |
-| **Permissions page** | Self-check for module / root / write-system-settings; tap a missing row to grant it, re-check any time | ❌ |
-| **Export diagnostic log** | One tap exports device info, module state and runtime logs (works without root) | ❌ |
-| **Restart System UI** | One tap restarts the status bar and navigation bar — use it when a change does not take effect | ⚠️ **Yes** |
-| **UI localisation** | Simplified Chinese / Traditional Chinese / English, system-following or manual | ❌ |
-| **Update check** | Checks GitHub Releases for a newer version on launch | ❌ |
-
-### What it needs to run
-
-**The prerequisite, stated up front so you don't install for nothing: root + LSPosed.**
+### Requirements
 
 | Requirement | Detail |
 |---|---|
@@ -186,7 +130,7 @@ Inner screen only (when unfolded). Relies on HyperOS private implementations; do
 | CPU | **arm64-v8a** — the APK ships only that ABI, so **32-bit-only devices cannot install it at all** |
 | Camera | a **front camera is required** |
 | Storage | ~41 MB for the APK, plus ~8.6 MB of native libraries unpacked at install time |
-| System | **the split-screen group requires Xiaomi HyperOS**; the rotation group is not model-specific. Nothing else is needed: no Google Play Services, no model download (the face model ships inside the APK) |
+| System | **split screen requires Xiaomi HyperOS**; rotation is not model-specific. No Google Play Services, no model download (the face model ships inside the APK) |
 
 **The module scope needs exactly one entry: `com.android.systemui`.**
 
@@ -195,11 +139,49 @@ Inner screen only (when unfolded). Relies on HyperOS private implementations; do
 
 **No extra grants are needed.** The camera and "modify system settings" come from permissions the SystemUI process already holds, and the semi-auto floating button works the same way (SystemUI runs as the system uid, so it does not need "display over other apps"). Nothing needs to be granted after install.
 
-> ⚠️ The only exceptions are the three rows marked **Root? Yes** above (Orientation / Raise the split limit / Restart System UI). Skip those and root is never needed — just don't tap the buttons marked as requiring root.
+> ⚠️ The only exceptions are the three rows marked **Root? Yes** below. Skip those and root is never needed — just don't tap the buttons marked as requiring root.
 
 > ⚠️ **The cost, also stated up front**: this module **injects code into the SystemUI process** and keeps it resident there, and it **modifies the system display-orientation settings** (restored on a normal exit, self-healed on the next launch if the process was killed). Requiring root and LSPosed means **unlocking the bootloader**, which voids the official warranty and can break some banking / payment apps.
 
+**Set it and forget it.** The engine lives inside the SystemUI process, so this app needs no autostart entry and no battery whitelist — backgrounding, locking, swiping it away or clearing it from Recents all change nothing, and a reboot brings it back on its own.
+
 > 📌 Every claim here comes from **one** device (a Xiaomi foldable running HyperOS). On a different model, confirm the unfold orientation on the "Orientation" card.
+
+### Features
+
+#### Rotation
+
+**Three ways to rotate, switchable at any time:**
+
+| | How it rotates |
+|---|---|
+| **Face** | Sees which way your face points and turns the screen that way. Good for lying down or lying on your side |
+| **Semi-auto** | Turn the phone and a button pops up in the bottom-right; tap it to rotate. No camera, lowest battery use |
+| **Follow system** | Left entirely to the system's "Auto-rotate"; the module stays out of the way |
+
+**On top of that:**
+
+| Feature | Root |
+|---|---|
+| Pick a rotation mode per app (unset apps follow the global one) | |
+| Falls back to tap-to-rotate when it's too dark or no face is visible | |
+| Exempt apps you don't want it to touch (games are on the list by default) | |
+| How long the rotate button stays on screen (1–60 s) | |
+| Quick Settings tile — one tap cycles the three modes | |
+| Default orientation each time the inner screen unfolds | ⚠️ Yes |
+
+#### Split screen
+
+| Feature | Root |
+|---|---|
+| Light fold squeezes the current app into half the screen and adds one more pane | |
+| Keep the current app on the left or right half | |
+| Exempt apps you don't want split (games are on the list by default) | |
+| Split temperature cap (47 °C by default) and the overheat-guard switch | |
+| Up to 8 apps at once (system default: 6) | ⚠️ Yes |
+
+> "Fold to add a split" is off by default — turn it on under "Experimental".
+> Reboot System UI once after raising the limit to 8.
 
 ### When something goes wrong: exporting logs and filing an issue
 
