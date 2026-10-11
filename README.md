@@ -13,17 +13,17 @@
 
 ## 中文
 
-折起来是手机、展开是平板，但系统给的那几项功能，用起来总差一口气：侧躺着刷，屏幕偏要横过来；想多开几个应用，格子上限卡在 6 个；分屏想放哪边、温度到几度收手，都改不了。
+HyperPlus 是一个 LSPosed 模块，为小米 18 Fold 增加系统本身没有的实用功能，分旋转和分屏两组。引擎常驻系统界面进程，App 只做配置界面。
 
-HyperPlus 是一个 LSPosed 模块，**一项一项把这些补上** —— 现在有旋转和分屏两组，后面还会加。引擎住在系统界面进程里，改完即时生效、跨重启保留。
+**依赖**：root ＋ LSPosed（libxposed API 101+）· HyperOS · Android 11+
 
-> 📌 这篇 README 只讲三件事：**① 有哪些功能 ② 需要什么运行环境 ③ 出问题怎么导出日志、怎么提 issue。**
+### 功能
 
-### 一、这个模块有哪些功能
+#### 旋转
 
-#### 旋转（只在展开后的内屏生效）
+只在展开后的内屏生效，不挑机型。
 
-| 功能 | 说明 | 要 root 吗 |
+| 功能 | 说明 | 需要 root |
 |---|---|---|
 | **人脸方向跟随旋转** | 前摄看一眼你脸朝哪，屏幕就朝哪。**首次使用要先到「实验功能」把开关打开** | ❌ |
 | **半自动旋转（点击确认）** | 转手机时右下角弹出按钮，**点一下才转**；不开摄像头，最省电 | ❌ |
@@ -34,22 +34,21 @@ HyperPlus 是一个 LSPosed 模块，**一项一项把这些补上** —— 现�
 | **控制中心快捷开关** | 三档循环切换，不用打开 App | ❌ |
 | **方向** | 展开后内屏保持的方向，四选一（按摄像头位置选） | ⚠️ **需要** |
 
-#### 分屏（只在展开后的内屏生效）
+#### 分屏
 
-| 功能 | 说明 | 要 root 吗 |
+只在展开后的内屏生效，依赖 HyperOS 私有实现，非小米机型不生效。
+
+| 功能 | 说明 | 需要 root |
 |---|---|---|
 | **轻折加分屏** | 轻折一下机身，把当前应用挤成半屏、再多出一格分屏；当前应用留在哪一侧可选（朝左 / 朝右）。**默认关闭 —— 到「分屏增强」页把开关打开** | ❌ |
 | **分屏应用名单** | 名单里的应用（默认＝市面上常见游戏）折一下也不分屏 | ❌ |
 | **高温保护可配置** | 增加分屏格子的温度上限可调（默认 47°C，是出厂设定值），过热保护也可以整个关掉 | ❌ |
 | **提高分屏上限** | 打开后折叠时最多同时摆 8 个应用（系统默认 6 个）；改完要重启一次系统界面 | ⚠️ **需要**（写开关） |
-
-> ⚠️ **分屏这一组依赖小米 HyperOS 的私有实现**，非小米机型上不会生效。旋转那一组不挑机型。
-
-> 📌 「轻折加分屏」的界面开关是 **2026-10-07 才接上的** —— 在此之前它只能在 adb 里设置档位，界面上没有入口，所以对用户一直是关的。如果你打开开关后轻折仍然没反应，请照第三节把诊断日志导出来提个 issue。
+| **分屏几何探针** | 排查 7/8 格异常用的只读日志探针，默认关闭 | ❌ |
 
 #### 通用
 
-| 功能 | 说明 | 要 root 吗 |
+| 功能 | 说明 | 需要 root |
 |---|---|---|
 | **常驻生效** | 引擎住在系统界面进程里 —— 回桌面 / 锁屏 / App 被强杀后仍然生效 | ❌ |
 | **不常开摄像头** | 靠朝向传感器唤醒，一次只采约 1 秒，采完立刻释放 | ❌ |
@@ -61,9 +60,7 @@ HyperPlus 是一个 LSPosed 模块，**一项一项把这些补上** —— 现�
 | **界面多语言** | 简体中文 / 繁体中文 / English，跟随系统或手动指定 | ❌ |
 | **更新提醒** | 启动时检查 GitHub Release 是否有新版本 | ❌ |
 
-**只有一个引擎，它住在系统界面进程里。** App 本身不跑引擎、不开相机，只是一块「遥控器 ＋ 仪表盘」：你在这里改的每一项配置都会直接推给引擎，即时生效，并跨重启保留。
-
-### 二、需要什么运行环境
+### 需要什么运行环境
 
 **门槛写在最前面，免得白装：需要 root ＋ LSPosed。**
 
@@ -90,7 +87,7 @@ HyperPlus 是一个 LSPosed 模块，**一项一项把这些补上** —— 现�
 
 > 📌 目前只在**一台**设备上验证过（小米折叠屏 / HyperOS）。换机型请在「方向」卡里核对展开方向。
 
-### 三、遇到问题：怎么导出日志、怎么提 issue
+### 遇到问题：怎么导出日志、怎么提 issue
 
 #### 先看这个 —— 装完系统界面反复重启，甚至进不了桌面
 
@@ -130,17 +127,15 @@ adb shell ls -l /data/tombstones/                                         # 有�
 
 ## English
 
-**Fills in the missing quality-of-life features on the Xiaomi 18 Fold.**
+HyperPlus is an LSPosed module that adds features the Xiaomi 18 Fold does not ship with, in two groups: rotation and split screen. The engine is resident in the SystemUI process; the app is a configuration UI only.
 
-Anyone who has doom-scrolled while lying on their side knows this: the phone is sideways in your hand, but gravity tells the system "this should be landscape", and the screen flips to an orientation you never wanted. Want more than a couple of apps at once and the split limit stops at six — and you cannot choose which side an app stays on, or at what temperature it stops adding panes.
+**Requires**: root + LSPosed (libxposed API 101+) · HyperOS · Android 11+
 
-HyperPlus is an LSPosed module that **adds these back one at a time** — today a rotation group and a split-screen group, with more to come. The engine lives inside the SystemUI process, so changes take effect immediately and survive a reboot.
+### Features
 
-> 📌 This README covers exactly three things: **① what it can do ② what it needs to run ③ how to export logs and file an issue.**
+#### Rotation
 
-### 1. What it can do
-
-#### Rotation (inner screen only, i.e. when unfolded)
+Inner screen only (when unfolded). Not model-specific.
 
 | Capability | What it means | Root? |
 |---|---|---|
@@ -153,7 +148,9 @@ HyperPlus is an LSPosed module that **adds these back one at a time** — today 
 | **Quick Settings tile** | Cycle the three modes without opening the app | ❌ |
 | **Orientation** | Pick the orientation the inner screen unfolds into (one of four) | ⚠️ **Yes** |
 
-#### Split screen (inner screen only, i.e. when unfolded)
+#### Split screen
+
+Inner screen only (when unfolded). Relies on HyperOS private implementations; does nothing on non-Xiaomi devices.
 
 | Capability | What it means | Root? |
 |---|---|---|
@@ -161,10 +158,7 @@ HyperPlus is an LSPosed module that **adds these back one at a time** — today 
 | **Split app list** | Apps on the list (common games by default) are never split when you fold | ❌ |
 | **Configurable overheat guard** | The temperature limit for adding panes is adjustable (default 47 °C, the factory value) and the guard can be turned off entirely | ❌ |
 | **Raise the split limit** | Once on, up to 8 apps can be split while folded (the system default is 6); a SystemUI restart is needed | ⚠️ **Yes** (to write the switch) |
-
-> ⚠️ **The split-screen group relies on Xiaomi HyperOS private implementations** and does nothing on non-Xiaomi devices. The rotation group is not model-specific.
-
-> 📌 The **"Fold to add a split" switch only got its UI entry on 2026-10-07**. Before that the mode could only be set from adb — there was no way to reach it from the app, so for users it was permanently off. If you turn the switch on and folding still does nothing, please follow section 3 and attach the diagnostic log to a new issue.
+| **Split geometry probe** | Read-only log probe for diagnosing 7/8-pane anomalies; off by default | ❌ |
 
 #### General
 
@@ -180,9 +174,7 @@ HyperPlus is an LSPosed module that **adds these back one at a time** — today 
 | **UI localisation** | Simplified Chinese / Traditional Chinese / English, system-following or manual | ❌ |
 | **Update check** | Checks GitHub Releases for a newer version on launch | ❌ |
 
-**There is exactly one engine, and it lives in the SystemUI process.** The app itself runs no engine and opens no camera — it is a remote control plus a dashboard. Everything you change here is pushed straight to the engine, effective immediately and preserved across reboots.
-
-### 2. What it needs to run
+### What it needs to run
 
 **The prerequisite, stated up front so you don't install for nothing: root + LSPosed.**
 
@@ -209,7 +201,7 @@ HyperPlus is an LSPosed module that **adds these back one at a time** — today 
 
 > 📌 Every claim here comes from **one** device (a Xiaomi foldable running HyperOS). On a different model, confirm the unfold orientation on the "Orientation" card.
 
-### 3. When something goes wrong: exporting logs and filing an issue
+### When something goes wrong: exporting logs and filing an issue
 
 #### Read this first — SystemUI keeps restarting, sometimes to the point where the launcher never comes up
 
