@@ -21,11 +21,12 @@ HyperPlus 是一个 LSPosed 模块，为小米 18 Fold 增加系统本身没有�
 |---|---|
 | root | 任意（KernelSU / Magisk …） |
 | LSPosed | **需支持 libxposed API 101 及以上**（现行的 LSPosed 2.x 都满足，1.8 及更早的版本不行） |
-| Android | **11 及以上** |
+| 机型 | **必须是折叠屏**（小米）—— 本模块是围绕内／外屏的形态切换做的，直板机不在支持范围内 |
+| 系统 | **HyperOS 4**（小米，底层 Android 17）—— ⛔ 不是 MIUI |
 | CPU | **arm64-v8a** —— APK 只带这一套原生库，**纯 32 位机型直接装不上** |
 | 摄像头 | **必须有前置摄像头** |
 | 空间 | APK 约 41 MB，装机后还会解出约 8.6 MB 原生库 |
-| 系统 | **分屏功能依赖小米 HyperOS**，旋转功能不限机型。不需要 GMS，不需要联网下载模型（人脸模型打在 APK 里） |
+| 其它 | 不需要 GMS，不需要联网下载模型（人脸模型打在 APK 里） |
 
 **模块作用域只需要勾一项：`com.android.systemui`。**
 
@@ -40,7 +41,7 @@ HyperPlus 是一个 LSPosed 模块，为小米 18 Fold 增加系统本身没有�
 
 **装完就不用管。** 引擎住在系统界面进程里，不需要给本应用加自启动或省电白名单 —— 退到后台、锁屏、划掉、清后台都不影响，重启手机后也自动恢复。
 
-> 📌 目前只在**一台**设备上验证过（小米折叠屏 / HyperOS）。换机型请在「方向」卡里核对展开方向。
+> 📌 **只在小米 18 Fold（HyperOS 4）上实测过**，没有第二台机型的数据。同为折叠屏的小米 MIX Fold 系列**理论上可用**（形态同理），但**没有实测过**。换机型请在「方向」卡里核对展开方向。
 
 ### 功能
 
@@ -126,11 +127,12 @@ HyperPlus is an LSPosed module that adds features the Xiaomi 18 Fold does not sh
 |---|---|
 | root | any (KernelSU / Magisk …) |
 | LSPosed | **must support libxposed API 101 or newer** (every current LSPosed 2.x does; 1.8 and older does not) |
-| Android | **11 or newer** |
+| Device | **must be a foldable** (Xiaomi) — the module is built around inner/outer screen switching; bar phones are out of scope |
+| System | **HyperOS 4** (Xiaomi, Android 17 underneath) — ⛔ not MIUI |
 | CPU | **arm64-v8a** — the APK ships only that ABI, so **32-bit-only devices cannot install it at all** |
 | Camera | a **front camera is required** |
 | Storage | ~41 MB for the APK, plus ~8.6 MB of native libraries unpacked at install time |
-| System | **split screen requires Xiaomi HyperOS**; rotation is not model-specific. No Google Play Services, no model download (the face model ships inside the APK) |
+| Other | no Google Play Services, no model download (the face model ships inside the APK) |
 
 **The module scope needs exactly one entry: `com.android.systemui`.**
 
@@ -145,7 +147,7 @@ HyperPlus is an LSPosed module that adds features the Xiaomi 18 Fold does not sh
 
 **Set it and forget it.** The engine lives inside the SystemUI process, so this app needs no autostart entry and no battery whitelist — backgrounding, locking, swiping it away or clearing it from Recents all change nothing, and a reboot brings it back on its own.
 
-> 📌 Every claim here comes from **one** device (a Xiaomi foldable running HyperOS). On a different model, confirm the unfold orientation on the "Orientation" card.
+> 📌 Tested **only on the Xiaomi 18 Fold (HyperOS 4)** — no second model has been verified. The Xiaomi MIX Fold series is **theoretically usable** (same foldable form factor) but has **not been tested**. On a different model, confirm the unfold orientation on the "Orientation" card.
 
 ### Features
 
