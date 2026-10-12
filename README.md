@@ -19,7 +19,7 @@ LSPosed 模块：给小米 18 Fold 加系统没有的功能。引擎常驻系统
 
 | 需要 | 具体 |
 |---|---|
-| 机型 | 小米折叠屏 |
+| 机型 | 小米 18 Fold（其它小米折叠屏理论可用） |
 | 系统 | HyperOS 4 |
 | root | 任意（KernelSU / Magisk…） |
 | LSPosed | 支持 libxposed API 101 及以上（1.8 及更早不行） |
@@ -36,7 +36,7 @@ LSPosed 模块：给小米 18 Fold 加系统没有的功能。引擎常驻系统
 
 退后台、锁屏、划掉、清后台都不影响，重启自动恢复。
 
-> 📌 只在小米 18 Fold（HyperOS 4）上测试过。小米 MIX Fold 系列理论上可用，未实测。换机型请在「方向」卡里核对展开方向。
+> 📌 只在小米 18 Fold（HyperOS 4）上测试过。其它小米折叠屏理论可用，未实测。换机型请在「方向」卡里核对展开方向。
 
 ### 功能
 
@@ -103,7 +103,7 @@ LSPosed module: adds features the Xiaomi 18 Fold does not ship with. The engine 
 
 | Requirement | Detail |
 |---|---|
-| Device | Xiaomi foldable |
+| Device | Xiaomi 18 Fold (other Xiaomi foldables should work) |
 | System | HyperOS 4 |
 | root | any (KernelSU / Magisk…) |
 | LSPosed | libxposed API 101 or newer (1.8 and older will not work) |
@@ -120,7 +120,7 @@ Scope: tick `com.android.systemui` only. HyperPlus itself does not need to be ti
 
 Backgrounding, locking, swiping it away or clearing it from Recents all make no difference; a reboot brings it back.
 
-> 📌 Tested only on the Xiaomi 18 Fold (HyperOS 4). Xiaomi MIX Fold series untested but should work. On a different model, confirm the unfold orientation on the "Orientation" card.
+> 📌 Tested only on the Xiaomi 18 Fold (HyperOS 4). Other Xiaomi foldables should work but are untested. On a different model, confirm the unfold orientation on the "Orientation" card.
 
 ### Features
 
